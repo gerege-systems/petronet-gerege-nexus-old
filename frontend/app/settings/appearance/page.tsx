@@ -60,7 +60,6 @@ export default function AppearanceSettingsPage() {
             const isOn = availableLocales.includes(option.code);
             return (
               <li key={option.code} className="flex items-center gap-3 px-4 py-3">
-                <img src={option.flag} alt="" width={20} height={20} className="rounded-sm shrink-0" />
                 <span className="text-sm font-medium text-slate-800 min-w-0 truncate">{option.label}</span>
                 <span className="text-[11px] uppercase tracking-wider text-slate-400">{option.code}</span>
                 <span className="ml-auto">

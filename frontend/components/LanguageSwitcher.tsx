@@ -3,8 +3,16 @@
 import { LOCALES, useI18n } from "@/lib/i18n";
 
 /**
- * Locale toggle. Flags come from the Flaticon set stored in the repository —
- * see docs/assets/icons/ATTRIBUTION.md.
+ * Locale toggle: the language's code, in words.
+ *
+ * It used to carry a circle flag beside each code. A flag is a country and not
+ * a language — English is not the United States and Arabic is not Saudi
+ * Arabia, and Mongolian is read on both sides of a border. The code alone says
+ * the thing without claiming the other.
+ *
+ * The visible label stays the short code, so the control is the same size it
+ * was. The full name is added out of sight for a screen reader, after the
+ * code, so the accessible name still contains what is on screen (WCAG 2.5.3).
  */
 export default function LanguageSwitcher({ variant = "light" }: { variant?: "light" | "dark" }) {
   const { locale, setLocale, availableLocales, t } = useI18n();
@@ -37,13 +45,12 @@ export default function LanguageSwitcher({ variant = "light" }: { variant?: "lig
           type="button"
           onClick={() => setLocale(option.code)}
           aria-pressed={locale === option.code}
-          title={option.label}
-          className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-semibold transition ${
+          className={`flex items-center rounded-md px-2 py-1 text-xs font-semibold transition ${
             locale === option.code ? activeStyle : idleStyle
           }`}
         >
-          <img src={option.flag} alt="" width={14} height={14} className="rounded-sm" />
           <span className="uppercase">{option.code}</span>
+          <span className="sr-only"> {option.label}</span>
         </button>
       ))}
     </div>
