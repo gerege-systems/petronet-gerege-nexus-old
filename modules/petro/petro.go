@@ -25,7 +25,6 @@
 package petro
 
 import (
-	"context"
 	"embed"
 	"encoding/json"
 	"errors"
@@ -81,10 +80,9 @@ func New(p nexus.Platform) *Module {
 	// Excel, CSV, schedules and e-mail delivery come with it. See reports.go.
 	RegisterReports()
 
-	// The reporting periods and the national day table. Both are writes that
-	// must happen whether or not anybody opens a screen; see jobs.go for why
-	// they are a ticker rather than a scheduler.
-	m.StartJobs(context.Background())
+	// The reporting periods and the national day table are started by the
+	// platform through Start (jobs.go), not here: the constructor has no
+	// context that shutdown cancels.
 
 	return m
 }
@@ -203,6 +201,10 @@ func (m *Module) Menus() []nexus.MenuDefinition {
 			Path:  "/petro/oversight",
 			Icon:  "shield-check",
 			Order: 12,
+			// Every member reads the network, only a supervisory body's
+			// officials act on it: without this the entry sat in everyone's
+			// sidebar and opened onto a 403.
+			Permission: "petro.oversight",
 			Labels: map[string]string{
 				"mn": "Улсын хяналт",
 				"ar": "الرقابة الوطنية",

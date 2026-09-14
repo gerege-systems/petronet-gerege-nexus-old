@@ -54,11 +54,21 @@ import (
 // morning's submissions, not yesterday's total.
 const jobInterval = time.Hour
 
+// Start is nexus.Starter: the platform calls it once the server is assembled,
+// with a context it cancels on graceful shutdown, so the ticker stops with the
+// process instead of being cut off when the pool closes under it. It used to
+// be started from New with context.Background(), which nothing ever cancelled.
+func (m *Module) Start(ctx context.Context) { m.StartJobs(ctx) }
+
+// A core that stops calling Start would leave the jobs silently unstarted;
+// this turns that into a compile error instead.
+var _ nexus.Starter = (*Module)(nil)
+
 // StartJobs runs the module's periodic work until ctx is done.
 //
-// Started from New. The first pass runs immediately rather than after the first
-// tick, so a deployment that boots at midnight has today's period before
-// anybody tries to answer it.
+// The first pass runs after a short delay rather than on the hour, so a
+// deployment that boots at midnight has today's period before anybody tries to
+// answer it.
 func (m *Module) StartJobs(ctx context.Context) {
 	go func() {
 		// 15s, 30s, 60s … up to eight minutes. Long enough to outlast a slow
