@@ -13,8 +13,10 @@ APP_DIR="$(dirname "$SRC_DIR")"
 
 [ -f "$APP_DIR/.env" ] || { echo "$APP_DIR/.env алга. .env.example-ээс хуулж, нууцуудыг нь бөглө." >&2; exit 1; }
 
-docker build -q -t petronet:latest -f "$SRC_DIR/deploy/Dockerfile" "$SRC_DIR"
-docker build -q -t petronet-web:latest "$SRC_DIR/frontend"
+# -q биш: чимээгүй build унавал зөвхөн «failed to solve» хэвлэгдэж, шалтгаан
+# (npm, compiler) харагдахгүй.
+docker build -t petronet:latest -f "$SRC_DIR/deploy/Dockerfile" "$SRC_DIR"
+docker build -t petronet-web:latest "$SRC_DIR/frontend"
 
 # Бүрхүүл ./brand-ийг nginx-ээр өгдөг тул байхгүй бол лого 404. chmod нь сайн
 # дурын биш: www-data 0700 хавтас дотор орж чадахгүй.
@@ -32,7 +34,8 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
-brand="$(grep -E '^BRAND_NAME=' "$APP_DIR/.env" | cut -d= -f2-)"
+# `|| true`: мөр байхгүй бол grep 1 буцааж, pipefail скриптийг чимээгүй зогсооно.
+brand="$(grep -E '^BRAND_NAME=' "$APP_DIR/.env" | cut -d= -f2- || true)"
 for i in $(seq 1 30); do
   if body="$(curl -fsS http://127.0.0.1:3018/login 2>/dev/null)"; then
     [ -z "$brand" ] && break

@@ -329,11 +329,14 @@ func (m *Module) handleCreateTank(w http.ResponseWriter, r *http.Request) {
 		draft.TankType = "vertical_steel"
 	}
 
-	// The depot is read first, under the row-level policy, so a tank cannot be
-	// attached to somebody else's base by putting their id in the path.
+	// The depot is read first, and by owner, so a tank cannot be attached to
+	// somebody else's base by putting their id in the path. The policy alone is
+	// not enough: an oversight body can read every depot (`oversight_read`), and
+	// a tank it created would count in the national stock.
 	var exists bool
 	err = m.db.QueryRow(r.Context(),
-		`SELECT true FROM petro_depots WHERE id = $1::uuid`, depotID).Scan(&exists)
+		`SELECT true FROM petro_depots WHERE id = $1::uuid AND tenant_id = $2::uuid`,
+		depotID, tenantID).Scan(&exists)
 	if errors.Is(err, pgx.ErrNoRows) {
 		nexus.Error(w, http.StatusNotFound, "ийм бааз олдсонгүй")
 		return
@@ -699,9 +702,14 @@ func isCheckViolation(err error) bool {
 // a decision the function took deliberately, so it must not reach the caller as
 // a 500 alongside the faults nobody planned for.
 func isInsufficientPrivilege(err error) bool {
+	return hasSQLState(err, "42501")
+}
+
+// hasSQLState reports whether err carries the given Postgres error code.
+func hasSQLState(err error, code string) bool {
 	if err == nil {
 		return false
 	}
 	var pgErr interface{ SQLState() string }
-	return errors.As(err, &pgErr) && pgErr.SQLState() == "42501"
+	return errors.As(err, &pgErr) && pgErr.SQLState() == code
 }

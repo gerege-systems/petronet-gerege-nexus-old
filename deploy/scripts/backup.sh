@@ -55,6 +55,9 @@
 # байхгүйгээс энэ дээр нь бүтээх боломжтой зүйл байсан нь дээр.
 
 set -euo pipefail
+# Dump нь бүх сан: иргэдийн мэдээлэл, нууц үгийн hash. cron-ийн анхдагч umask
+# 022 нь түүнийг хостын дурын хэрэглэгчид уншигдахаар үлдээдэг байв.
+umask 077
 
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/petronet}"
 BACKUP_KEEP_DAYS="${BACKUP_KEEP_DAYS:-14}"
@@ -128,10 +131,15 @@ record() {
         >/dev/null 2>&1 || echo "backup: өгөгдлийн санд бүртгэж чадсангүй" >&2
 }
 
+# Тогтмол /tmp зам биш: root-оор ажиллах скрипт урьдчилан тавьсан symlink-ээр
+# дурын файлыг дарж бичиж болно.
+errfile="$(mktemp)"
+trap 'rm -f "${errfile}"' EXIT
+
 if ! docker exec -i "${POSTGRES_CONTAINER}" \
         pg_dump -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" --no-owner --clean --if-exists \
-        2>/tmp/petronet-backup.err | gzip -9 > "${target}"; then
-    detail="$(tail -c 500 /tmp/petronet-backup.err || true)"
+        2>"${errfile}" | gzip -9 > "${target}"; then
+    detail="$(tail -c 500 "${errfile}" || true)"
     rm -f "${target}"
     record false NULL "pg_dump failed: ${detail}"
     write_metrics false 0

@@ -309,6 +309,11 @@ func (m *Module) handleRecordSale(w http.ResponseWriter, r *http.Request) {
 			nexus.Error(w, http.StatusNotFound, "ШТС олдсонгүй")
 			return
 		}
+		if hasSQLState(err, "55000") {
+			nexus.Error(w, http.StatusConflict,
+				"энэ ШТС түдгэлзсэн эсвэл ваучер хүлээн авдаггүй байна")
+			return
+		}
 		if err != nil {
 			nexus.Error(w, http.StatusInternalServerError, "could not redeem the voucher")
 			return

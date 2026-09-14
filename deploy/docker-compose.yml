@@ -32,6 +32,13 @@ name: petronet
 x-hardening: &hardening
   security_opt:
     - no-new-privileges:true
+  # Хязгааргүй json-file лог дискийг дүүргэтэл өсдөг. Доорх статик сайтууд
+  # үүнийг аль хэдийн тавьсан, бусад сервис юу ч өвлөөгүй байв.
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "5"
 
 services:
   postgres:
@@ -395,15 +402,22 @@ services:
       GF_AUTH_GENERIC_OAUTH_EMAIL_ATTRIBUTE_PATH: email
       GF_AUTH_GENERIC_OAUTH_LOGIN_ATTRIBUTE_PATH: email
       GF_AUTH_GENERIC_OAUTH_NAME_ATTRIBUTE_PATH: name
-      # Claim дээрх JMESPath. Платформын админ биш хэн ч самбарыг уншиж
-      # чадах ч юуг ч өөрчилж чадахгүй.
-      GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_PATH: "platform_admin && 'GrafanaAdmin' || 'Viewer'"
+      # Claim дээрх JMESPath. Зөвхөн платформын админ орно.
+      #
+      # Өмнө нь бусад нь Viewer болдог байв. Энэ систем PLATFORM_ACCESS_MODE=public
+      # бөгөөд Grafana-гийн клиент каталогт байхгүй тул цөмийн хаалга түүнийг
+      # «зөвшөөрөгдсөн» гэж үзэж, eID-ээр нэвтэрсэн ДУРЫН иргэн хост ба сангийн
+      # самбарыг харах эрхтэй болж байв.
+      GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_PATH: "platform_admin && 'GrafanaAdmin' || ''"
       # Дээрх зам сервер админы эрх өгөхийн өмнө заавал хэрэгтэй; үүнгүйгээр
       # GrafanaAdmin нь чимээгүйхэн зүгээр Admin болно.
       GF_AUTH_GENERIC_OAUTH_ALLOW_ASSIGN_GRAFANA_ADMIN: "true"
-      # Юу ч олдохгүй зам нь хүнийг гаднаа үлдээх ёсгүй — тэр нь эрхгүй
-      # бүртгэлийн байх ёстой зүйл болох Viewer болно.
-      GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_STRICT: "false"
+      # Хоосон үүрэг = нэвтрэлтээс татгалзах. Буцаж орох зам нь дээрх
+      # GF_SECURITY_ADMIN_PASSWORD хэвээр.
+      GF_AUTH_GENERIC_OAUTH_ROLE_ATTRIBUTE_STRICT: "true"
+      # Grafana-гийн өөрийн /metrics нэвтрэлтгүй бөгөөд Prometheus үүнийг
+      # цуглуулдаггүй — нийтэд нээлттэй байх шалтгаан алга.
+      GF_METRICS_ENABLED: "false"
       # Provider нь PKCE дэмждэг бөгөөд энэ нь браузараас эхэлдэг урсгал:
       # PKCE-гүй ажиллуулах шалтгаан алга.
       GF_AUTH_GENERIC_OAUTH_USE_PKCE: "true"

@@ -91,7 +91,10 @@ func (m *Module) handleNationalDashboard(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	day := r.URL.Query().Get("day")
+	day, ok := dayParam(w, r)
+	if !ok {
+		return
+	}
 	if day == "" {
 		if err := m.db.QueryRow(r.Context(),
 			`SELECT COALESCE(MAX(day)::text, CURRENT_DATE::text) FROM petro_daily_national`).
@@ -441,7 +444,10 @@ func (m *Module) handleRefreshDaily(w http.ResponseWriter, r *http.Request) {
 // share of the country it came from invites everyone to treat it as complete,
 // and it is the one thing a reader outside the system cannot check.
 func (m *Module) handlePublicDaily(w http.ResponseWriter, r *http.Request) {
-	day := r.URL.Query().Get("day")
+	day, ok := dayParam(w, r)
+	if !ok {
+		return
+	}
 	if day == "" {
 		if err := m.db.QueryRow(r.Context(),
 			`SELECT MAX(day)::text FROM petro_daily_national`).Scan(&day); err != nil || day == "" {
@@ -510,4 +516,21 @@ func (m *Module) handlePublicDaily(w http.ResponseWriter, r *http.Request) {
 	}
 
 	nexus.JSON(w, http.StatusOK, map[string]any{"day": day, "products": out})
+}
+
+// dayParam reads the optional ?day=YYYY-MM-DD.
+//
+// Checked here rather than left to `$1::date`: a malformed value used to reach
+// Postgres, fail with 22007 and come back as a 500 — on the public endpoint too,
+// where anybody could fill the error log with it.
+func dayParam(w http.ResponseWriter, r *http.Request) (string, bool) {
+	day := r.URL.Query().Get("day")
+	if day == "" {
+		return "", true
+	}
+	if _, err := time.Parse("2006-01-02", day); err != nil {
+		nexus.Error(w, http.StatusBadRequest, "огноо YYYY-MM-DD хэлбэртэй байна")
+		return "", false
+	}
+	return day, true
 }

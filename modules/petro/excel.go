@@ -170,6 +170,10 @@ func (m *Module) handleSubmitExcel(w http.ResponseWriter, r *http.Request) {
 
 	// 16 MB: an eleven-hundred-row workbook is well under a megabyte, and the
 	// margin is for the formatting a sender's copy of Excel adds.
+	//
+	// ParseMultipartForm's argument only bounds what it keeps in memory — the
+	// rest spills to a temp file with no limit — so the body is capped first.
+	r.Body = http.MaxBytesReader(w, r.Body, 16<<20)
 	if err := r.ParseMultipartForm(16 << 20); err != nil {
 		nexus.Error(w, http.StatusBadRequest, "файлыг уншиж чадсангүй")
 		return
@@ -181,7 +185,12 @@ func (m *Module) handleSubmitExcel(w http.ResponseWriter, r *http.Request) {
 	}
 	defer upload.Close()
 
-	file, err := excelize.OpenReader(upload)
+	// A workbook is a zip: a few megabytes can inflate to gigabytes, and
+	// excelize's own ceiling is 16 GB. The template unpacks to well under 64 MB.
+	file, err := excelize.OpenReader(upload, excelize.Options{
+		UnzipSizeLimit:    64 << 20,
+		UnzipXMLSizeLimit: 16 << 20,
+	})
 	if err != nil {
 		nexus.Error(w, http.StatusBadRequest, "энэ файл Excel биш эсвэл эвдэрсэн байна")
 		return
