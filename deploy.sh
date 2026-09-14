@@ -45,4 +45,14 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
-echo "OK: $(grep -E '^PUBLIC_ORIGIN=' "$APP_DIR/.env" | cut -d= -f2) — $brand"
+# Ажиллаж буй бинарийн цөм go.mod-ын pin-тэй таарч байна уу. Pin-ийг сольсон
+# ч build кэш эсвэл хуучин образ ажилласаар байвал health, brand хоёр ногоон
+# хэвээр байдаг — энэ л ялгааг хэлдэг цорын ганц шалгалт.
+want="$(awk '$1 == "github.com/gerege-systems/open-gerege-nexus/backend" { print $2 }' "$SRC_DIR/go.mod")"
+got="$(docker exec gerege_petronet_backend cat /app/CORE_VERSION 2>/dev/null || true)"
+if [ -z "$want" ] || [ "$got" != "$want" ]; then
+  echo "цөмийн хувилбар таарахгүй: go.mod=${want:-?}, ажиллаж буй бинарь=${got:-?}" >&2
+  exit 1
+fi
+
+echo "OK: $(grep -E '^PUBLIC_ORIGIN=' "$APP_DIR/.env" | cut -d= -f2) — $brand — цөм $got"

@@ -60,6 +60,14 @@ RUN core=$(go list -m -f '{{.Version}}' github.com/gerege-systems/open-gerege-ne
     -ldflags="-w -s -X ${sym}=${version}" \
     -o /bin/petronet .
 
+# Бинарьт үнэхээр орсон цөмийн хувилбар — go.mod-оос биш, бинарийн buildinfo-оос.
+# deploy.sh үүнийг go.mod-той тулгаж, pin-ээ солисон атлаа хуучин кэштэй образ
+# ажиллаж байгааг deploy бүрд барина. Эцсийн образд Go байхгүй тул энд уншина.
+RUN go version -m /bin/petronet \
+    | awk '$1 == "dep" && $2 == "github.com/gerege-systems/open-gerege-nexus/backend" { print $3 }' \
+    > /bin/core-version \
+    && test -s /bin/core-version
+
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-w -s" \
     -o /bin/migrate github.com/gerege-systems/open-gerege-nexus/backend/cmd/migrate
 
@@ -140,6 +148,7 @@ RUN apk add --no-cache ca-certificates tzdata wget \
 WORKDIR /app
 
 COPY --from=build /bin/petronet /app/petronet
+COPY --from=build /bin/core-version /app/CORE_VERSION
 COPY --from=build /bin/migrate  /app/migrate
 COPY --from=build /bin/operator-bootstrap /app/operator-bootstrap
 COPY --from=build /bin/tenant-bootstrap /app/tenant-bootstrap
