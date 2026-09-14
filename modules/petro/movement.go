@@ -107,6 +107,10 @@ func (m *Module) handleOpenMovement(w http.ResponseWriter, r *http.Request) {
 		nexus.Error(w, http.StatusBadRequest, "ачсан хэмжээ 0-ээс их байх ёстой")
 		return
 	}
+	if noteTooLong(draft.Note) {
+		nexus.Error(w, http.StatusBadRequest, noteTooLongMessage)
+		return
+	}
 	if draft.FromKind == "" || draft.ToKind == "" {
 		nexus.Error(w, http.StatusBadRequest, "хаанаас хаашаа явж байгааг заана уу")
 		return
@@ -208,6 +212,10 @@ func (m *Module) handleCloseMovement(w http.ResponseWriter, r *http.Request) {
 	}
 	if receipt.ReceivedLiters < 0 {
 		nexus.Error(w, http.StatusBadRequest, "хүлээн авсан хэмжээ сөрөг байж болохгүй")
+		return
+	}
+	if noteTooLong(receipt.Note) {
+		nexus.Error(w, http.StatusBadRequest, noteTooLongMessage)
 		return
 	}
 
@@ -355,6 +363,10 @@ func (m *Module) handleDisputeMovement(w http.ResponseWriter, r *http.Request) {
 	}
 	if verdict.Note == "" {
 		nexus.Error(w, http.StatusBadRequest, "маргаантай гэж үзсэн шалтгааныг бичнэ үү")
+		return
+	}
+	if noteTooLong(verdict.Note) {
+		nexus.Error(w, http.StatusBadRequest, noteTooLongMessage)
 		return
 	}
 

@@ -106,6 +106,13 @@ func (m *Module) handleDispatchFromDepot(w http.ResponseWriter, r *http.Request)
 		nexus.Error(w, http.StatusBadRequest, "цистерний улсын дугаар заавал")
 		return
 	}
+	// A movement is closed by whoever owns its destination (migration 00016),
+	// so one opened with no station is refused by the table's CHECK after the
+	// tank has been drawn down — answered here, before anything moves.
+	if draft.OpenMovement && draft.ToStationID == "" {
+		nexus.Error(w, http.StatusBadRequest, "хөдөлгөөн нээхэд очих ШТС-ийг заана уу")
+		return
+	}
 
 	// The destination has to be a forecourt that exists and may trade. The
 	// foreign key alone did not say so: it is checked past the row-level

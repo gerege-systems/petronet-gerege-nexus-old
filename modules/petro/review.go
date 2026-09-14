@@ -167,6 +167,10 @@ func (m *Module) handleReview(decision string) http.HandlerFunc {
 			nexus.Error(w, http.StatusBadRequest, "буцаах шалтгааныг бичнэ үү")
 			return
 		}
+		if noteTooLong(verdict.Note) {
+			nexus.Error(w, http.StatusBadRequest, noteTooLongMessage)
+			return
+		}
 
 		// Four eyes, and the state machine, in one statement: a submission
 		// already decided is not decided again, and the person who sent it is
