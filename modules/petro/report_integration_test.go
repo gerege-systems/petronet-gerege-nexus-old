@@ -464,6 +464,17 @@ func TestADeliveryToAnotherCompanysStationIsReceivedByThatCompany(t *testing.T) 
 	}
 	trip := decode[Dispatch](t, rec)
 
+	// The load carries the batch its importer minted at clearing — the
+	// supplier's row, a third party's to the station. The dispatch handler does
+	// not attach it yet, so it is attached here to exercise that branch.
+	var batchCode string
+	if err := pool.QueryRow(context.Background(), `
+		WITH b AS (SELECT id, batch_code FROM petro_batches WHERE customs_shipment_id = $2::uuid)
+		UPDATE petro_dispatch_trips SET batch_id = (SELECT id FROM b) WHERE id = $1::uuid
+		RETURNING (SELECT batch_code FROM b)`, trip.TripID, shipmentID).Scan(&batchCode); err != nil {
+		t.Fatalf("attach the batch: %v", err)
+	}
+
 	// The sender cannot sign for the other company's forecourt.
 	rec = supplier.call(t, supplier.module.handleReceiveDelivery, http.MethodPost,
 		"/trips/x/receive", ReceiveRequest{Liters: 12000}, map[string]string{"id": trip.TripID})
@@ -477,8 +488,18 @@ func TestADeliveryToAnotherCompanysStationIsReceivedByThatCompany(t *testing.T) 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("the station could not receive its delivery: %d %s", rec.Code, rec.Body.String())
 	}
-	if got := decode[Receipt](t, rec); got.StockAfterLiters != 11950 || got.StationID != stationID {
-		t.Fatalf("receipt came back as %+v", got)
+	if got := decode[Receipt](t, rec); got.StockAfterLiters != 11950 || got.StationID != stationID ||
+		got.BatchCode != batchCode {
+		t.Fatalf("receipt came back as %+v, want batch %q", got, batchCode)
+	}
+	var batchReceived float64
+	if err := pool.QueryRow(context.Background(), `
+		SELECT received_liters::float8 FROM petro_batches WHERE batch_code = $1 AND tenant_id = $2::uuid`,
+		batchCode, supplier.tenantID).Scan(&batchReceived); err != nil {
+		t.Fatalf("read the batch: %v", err)
+	}
+	if batchReceived != 11950 {
+		t.Fatalf("the importer's batch shows %v received, want 11950", batchReceived)
 	}
 
 	// Once, not twice.

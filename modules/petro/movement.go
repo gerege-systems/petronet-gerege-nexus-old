@@ -111,6 +111,12 @@ func (m *Module) handleOpenMovement(w http.ResponseWriter, r *http.Request) {
 		nexus.Error(w, http.StatusBadRequest, "хаанаас хаашаа явж байгааг заана уу")
 		return
 	}
+	// A movement is closed by whoever owns its destination, so a destination
+	// that is not a registered site is a movement nobody could ever close.
+	if (draft.ToKind != "station" && draft.ToKind != "depot") || !isUUID(draft.ToID) {
+		nexus.Error(w, http.StatusBadRequest, "очих газар нь бүртгэлтэй ШТС эсвэл бааз байна")
+		return
+	}
 	if draft.DueHours <= 0 {
 		// Long enough for the far provinces, short enough that a lorry lost for
 		// three days is a question the same week.

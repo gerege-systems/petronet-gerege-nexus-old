@@ -196,6 +196,12 @@ $$;
 REVOKE ALL ON FUNCTION petro_owns_site(TEXT, UUID) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION petro_owns_site(TEXT, UUID) TO gerege_nexus_tenant;
 
+-- Очих газаргүй хөдөлгөөнийг хэн ч хааж чадахгүй (хаах нь очих объектын
+-- эзнийх). Прод дээр хөдөлгөөн байхгүй тул шууд баталгаажна.
+ALTER TABLE petro_movements
+    ADD CONSTRAINT movement_destination_is_site
+    CHECK (to_kind IN ('station', 'depot') AND to_id IS NOT NULL);
+
 -- Хүлээн авагч өөр рүүгээ ирж буй хөдөлгөөнийг харна. Зөвхөн SELECT: хаах нь
 -- доорх функцээр. Харахгүй бол 15 °C-ийн засвар хийх бүтээгдэхүүнээ ч мэдэхгүй.
 CREATE POLICY receiver_read ON petro_movements FOR SELECT TO gerege_nexus_tenant
@@ -577,6 +583,7 @@ CREATE POLICY oversight_close ON petro_movements FOR UPDATE TO gerege_nexus_tena
 DROP FUNCTION IF EXISTS petro_dispute_movement(UUID, TEXT);
 DROP FUNCTION IF EXISTS petro_close_movement(UUID, NUMERIC, NUMERIC, UUID, TEXT);
 DROP POLICY IF EXISTS receiver_read ON petro_movements;
+ALTER TABLE petro_movements DROP CONSTRAINT IF EXISTS movement_destination_is_site;
 DROP FUNCTION IF EXISTS petro_owns_site(TEXT, UUID);
 
 -- +goose StatementBegin
