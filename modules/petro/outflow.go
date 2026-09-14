@@ -107,6 +107,31 @@ func (m *Module) handleDispatchFromDepot(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	// The destination has to be a forecourt that exists and may trade. The
+	// foreign key alone did not say so: it is checked past the row-level
+	// policy, so a load could name any company's station — including a
+	// suspended one — and nobody could then receive it, leaving the litres
+	// drawn from the tank and on the road for ever. Asked through a named
+	// function because another company's station is not a row this session can
+	// read (migration 00016).
+	if draft.ToStationID != "" {
+		var registry *string
+		if err := m.db.QueryRow(r.Context(),
+			`SELECT petro_station_registry_status($1::uuid)`, draft.ToStationID).
+			Scan(&registry); err != nil {
+			nexus.Error(w, http.StatusInternalServerError, "could not check the station")
+			return
+		}
+		if registry == nil {
+			nexus.Error(w, http.StatusNotFound, "ийм ШТС олдсонгүй")
+			return
+		}
+		if *registry != "active" {
+			nexus.Error(w, http.StatusConflict, "энэ ШТС түдгэлзсэн эсвэл хаагдсан тул ачаа хүлээж авахгүй")
+			return
+		}
+	}
+
 	tx, err := m.db.Begin(r.Context())
 	if err != nil {
 		nexus.Error(w, http.StatusInternalServerError, "could not open a transaction")
@@ -264,6 +289,14 @@ func (m *Module) handleRecordSale(w http.ResponseWriter, r *http.Request) {
 		nexus.Error(w, http.StatusBadRequest, "ваучерын id буруу")
 		return
 	}
+	// The id alone used to be enough, and an id is not a secret: it is written
+	// to the audit log with every sale. The code the citizen shows is what
+	// spends the voucher; the id, when sent, only has to agree with it
+	// (migration 00016).
+	if draft.VoucherID != "" && draft.QRToken == "" {
+		nexus.Error(w, http.StatusBadRequest, "ваучерын QR код заавал")
+		return
+	}
 
 	tx, err := m.db.Begin(r.Context())
 	if err != nil {
@@ -275,7 +308,7 @@ func (m *Module) handleRecordSale(w http.ResponseWriter, r *http.Request) {
 	sale := Sale{StationID: stationID, Liters: draft.Liters}
 
 	// The voucher first: if it cannot be closed, no fuel should leave. Matched
-	// by id or by the QR the citizen presents, and only while it is active —
+	// by the QR the citizen presents (and the id, when sent), only while active —
 	// the WHERE clause is what makes a second scan of the same code fail
 	// rather than dispense twice.
 	//

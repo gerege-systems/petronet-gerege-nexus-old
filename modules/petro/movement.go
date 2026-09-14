@@ -111,6 +111,12 @@ func (m *Module) handleOpenMovement(w http.ResponseWriter, r *http.Request) {
 		nexus.Error(w, http.StatusBadRequest, "хаанаас хаашаа явж байгааг заана уу")
 		return
 	}
+	// A movement is closed by whoever owns its destination, so a destination
+	// that is not a registered site is a movement nobody could ever close.
+	if (draft.ToKind != "station" && draft.ToKind != "depot") || !isUUID(draft.ToID) {
+		nexus.Error(w, http.StatusBadRequest, "очих газар нь бүртгэлтэй ШТС эсвэл бааз байна")
+		return
+	}
 	if draft.DueHours <= 0 {
 		// Long enough for the far provinces, short enough that a lorry lost for
 		// three days is a question the same week.
@@ -205,13 +211,14 @@ func (m *Module) handleCloseMovement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Visible to the receiver through `receiver_read`, which is what lets the
+	// received litres be corrected with the movement's own product.
 	var declared float64
-	var declared15C *float64
 	var product, status string
 	err = m.db.QueryRow(r.Context(), `
-		SELECT declared_liters::float8, declared_liters_15c::float8, product_code, status
+		SELECT declared_liters::float8, product_code, status
 		  FROM petro_movements WHERE id = $1::uuid`, id).
-		Scan(&declared, &declared15C, &product, &status)
+		Scan(&declared, &product, &status)
 	if errors.Is(err, pgx.ErrNoRows) {
 		nexus.Error(w, http.StatusNotFound, "ийм хөдөлгөөн олдсонгүй")
 		return
@@ -237,41 +244,32 @@ func (m *Module) handleCloseMovement(w http.ResponseWriter, r *http.Request) {
 		received15C = &corrected
 	}
 
-	left, right := declared, receipt.ReceivedLiters
-	if declared15C != nil && received15C != nil {
-		left, right = *declared15C, *received15C
-	}
-	var variance *float64
-	if left > 0 {
-		// Clamped to the column. `received_liters: 200000` against a declared
-		// 1,000 — an extra zero — produced −19,900%, a numeric overflow, a 500,
-		// and a movement left open for ever with no way to close it (audit
-		// §13). At the clamp it still reads as impossible, which is the point.
-		v := (left - right) / left * 100
-		if v > 9999 {
-			v = 9999
-		}
-		if v < -9999 {
-			v = -9999
-		}
-		variance = &v
-	}
-
+	// Through petro_close_movement rather than an UPDATE here. The row belongs
+	// to the sender's organisation, so under `tenant_isolation` the receiver
+	// could never touch it and the sender could close its own consignment with
+	// whatever figure it liked — the one party with a reason to shrink the gap
+	// was the only one able to write it. The function closes a movement only
+	// for the organisation that owns its destination, and computes the
+	// variance (clamped to ±9999, audit §13) under the same lock as the
+	// declared figure it is measured against (migration 00016).
 	var mv Movement
 	err = m.db.QueryRow(r.Context(), `
-		UPDATE petro_movements
-		   SET received_liters = $2, received_liters_15c = $3, variance_pct = $4,
-		       status = 'closed', closed_at = NOW(), closed_by = $5::uuid,
-		       note = CASE WHEN $6 = '' THEN note ELSE $6 END
-		 WHERE id = $1::uuid AND status = 'open'
-		RETURNING id::text, national_ref, from_kind, from_id::text, to_kind, to_id::text,
-		          product_code, declared_liters::float8, received_liters::float8, status,
-		          variance_pct::float8, opened_at::text, due_at::text, closed_at::text, note`,
-		id, receipt.ReceivedLiters, received15C, variance, claims.UserID, receipt.Note).
+		SELECT id::text, national_ref, from_kind, from_id::text, to_kind, to_id::text,
+		       product_code, declared_liters::float8, received_liters::float8, status,
+		       variance_pct::float8, opened_at::text, due_at::text, closed_at::text, note
+		  FROM petro_close_movement($1::uuid, $2, $3, $4::uuid, $5)`,
+		id, receipt.ReceivedLiters, received15C, claims.UserID, receipt.Note).
 		Scan(&mv.ID, &mv.NationalRef, &mv.FromKind, &mv.FromID, &mv.ToKind, &mv.ToID,
 			&mv.ProductCode, &mv.DeclaredLiters, &mv.ReceivedLiters, &mv.Status,
 			&mv.VariancePct, &mv.OpenedAt, &mv.DueAt, &mv.ClosedAt, &mv.Note)
-	if errors.Is(err, pgx.ErrNoRows) {
+	if isInsufficientPrivilege(err) {
+		// The sender and the regulator can both read the movement; neither may
+		// close it, and which of "not yours" and "not there" is not theirs to
+		// learn.
+		nexus.Error(w, http.StatusNotFound, "ийм хөдөлгөөн олдсонгүй")
+		return
+	}
+	if hasSQLState(err, "55000") {
 		nexus.Error(w, http.StatusConflict, "хөдөлгөөний төлөв өөрчлөгдсөн байна")
 		return
 	}
@@ -282,7 +280,7 @@ func (m *Module) handleCloseMovement(w http.ResponseWriter, r *http.Request) {
 
 	nexus.Audit(r.Context(), tenantID, claims.UserID, "petro.movement.closed", mv.ID,
 		map[string]any{"ref": mv.NationalRef, "declared": declared,
-			"received": receipt.ReceivedLiters, "variance_pct": variance})
+			"received": receipt.ReceivedLiters, "variance_pct": mv.VariancePct})
 
 	nexus.JSON(w, http.StatusOK, mv)
 }
@@ -360,13 +358,17 @@ func (m *Module) handleDisputeMovement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var ref string
-	err := m.db.QueryRow(r.Context(), `
-		UPDATE petro_movements
-		   SET status = 'disputed', note = note || CASE WHEN note = '' THEN '' ELSE ' · ' END || $2
-		 WHERE id = $1::uuid AND status IN ('open', 'closed')
-		RETURNING national_ref`, id, verdict.Note).Scan(&ref)
-	if errors.Is(err, pgx.ErrNoRows) {
+	// Through petro_dispute_movement: the policy this replaced was FOR UPDATE on
+	// every column, so a regulator could rewrite the declared and received
+	// figures it was meant to be disputing (migration 00016).
+	var ref *string
+	err := m.db.QueryRow(r.Context(),
+		`SELECT petro_dispute_movement($1::uuid, $2)`, id, verdict.Note).Scan(&ref)
+	if isInsufficientPrivilege(err) {
+		nexus.Error(w, http.StatusForbidden, oversightReadOnlyMessage)
+		return
+	}
+	if err == nil && ref == nil {
 		nexus.Error(w, http.StatusNotFound, "ийм хөдөлгөөн олдсонгүй, эсвэл маргах боломжгүй төлөвт байна")
 		return
 	}
@@ -376,7 +378,7 @@ func (m *Module) handleDisputeMovement(w http.ResponseWriter, r *http.Request) {
 	}
 
 	nexus.Audit(r.Context(), tenantID, claims.UserID, "petro.movement.disputed", id,
-		map[string]any{"ref": ref, "note": verdict.Note})
+		map[string]any{"ref": *ref, "note": verdict.Note})
 
-	nexus.JSON(w, http.StatusOK, map[string]any{"id": id, "national_ref": ref, "status": "disputed"})
+	nexus.JSON(w, http.StatusOK, map[string]any{"id": id, "national_ref": *ref, "status": "disputed"})
 }

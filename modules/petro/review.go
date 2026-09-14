@@ -49,6 +49,17 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// oversightReadOnlyMessage answers a supervisory body whose scope lets it watch
+// but not act.
+//
+// petro_oversight_bodies.scope was never read: an audit office, a tax or a
+// customs body and a province passed petro_is_oversight() exactly as the
+// ministry did, and could suspend a forecourt or approve a report. The write
+// functions now require 'national' themselves and raise 42501 otherwise — by
+// the time a handler sees that code, requireOversight has already passed, so
+// the scope is the only thing it can mean (migration 00016).
+const oversightReadOnlyMessage = "танай байгууллагын эрх зөвхөн харах — энэ үйлдлийг үндэсний хяналтын байгууллага хийнэ"
+
 // requireOversight refuses a caller whose organisation is not a supervisory
 // body, and answers the tenant and user of one that is.
 func (m *Module) requireOversight(w http.ResponseWriter, r *http.Request) (tenantID string, claims nexus.UserClaims, ok bool) {
@@ -183,17 +194,26 @@ func (m *Module) handleReview(decision string) http.HandlerFunc {
 			return
 		}
 
+		// Through petro_review_submission rather than an UPDATE under the old
+		// `oversight_review` policy, which was FOR UPDATE on every column: the
+		// hash, the chain position, the tenant and the declared figures were
+		// all writable by the body that was only meant to decide. The function
+		// writes the decision columns alone and repeats both guards above in
+		// its WHERE, so a race between two officials still decides once
+		// (migration 00016).
 		var updated Submission
 		err = m.db.QueryRow(r.Context(), `
-			UPDATE petro_report_submissions
-			   SET status = $2, reviewed_by = $3::uuid, reviewed_at = NOW(), review_note = $4
-			 WHERE id = $1::uuid AND status = $5
-			RETURNING id::text, period_id::text, version, status, source, row_count,
-			          error_count, warning_count, submitted_at::text, reviewed_at::text, review_note`,
-			id, decision, claims.UserID, verdict.Note, StatusSubmitted).
+			SELECT id::text, period_id::text, version, status, source, row_count,
+			       error_count, warning_count, submitted_at::text, reviewed_at::text, review_note
+			  FROM petro_review_submission($1::uuid, $2, $3, $4::uuid)`,
+			id, decision, verdict.Note, claims.UserID).
 			Scan(&updated.ID, &updated.PeriodID, &updated.Version, &updated.Status,
 				&updated.Source, &updated.RowCount, &updated.ErrorCount, &updated.WarningCount,
 				&updated.SubmittedAt, &updated.ReviewedAt, &updated.ReviewNote)
+		if isInsufficientPrivilege(err) {
+			nexus.Error(w, http.StatusForbidden, oversightReadOnlyMessage)
+			return
+		}
 		if errors.Is(err, pgx.ErrNoRows) {
 			nexus.Error(w, http.StatusConflict, "тайлангийн төлөв өөрчлөгдсөн байна")
 			return
@@ -265,7 +285,7 @@ func (m *Module) handleSetSiteStatus(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "42501" {
-			nexus.Error(w, http.StatusForbidden, "энэ үйлдэл зөвхөн хяналтын байгууллагад нээлттэй")
+			nexus.Error(w, http.StatusForbidden, oversightReadOnlyMessage)
 			return
 		}
 		nexus.Error(w, http.StatusInternalServerError, "could not change the status")

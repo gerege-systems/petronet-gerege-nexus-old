@@ -423,6 +423,10 @@ func (m *Module) handleRefreshDaily(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := m.RefreshDaily(r.Context(), day); err != nil {
+		if isInsufficientPrivilege(err) {
+			nexus.Error(w, http.StatusForbidden, oversightReadOnlyMessage)
+			return
+		}
 		slog.Error("petro: daily refresh failed", "error", err)
 		nexus.Error(w, http.StatusInternalServerError, "could not refresh the national table")
 		return

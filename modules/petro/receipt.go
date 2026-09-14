@@ -36,7 +36,6 @@ import (
 
 	"github.com/gerege-systems/open-gerege-nexus/backend/pkg/nexus"
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
 )
 
 // ReceiveRequest is what a station says when a tanker is unloaded.
@@ -118,119 +117,65 @@ func (m *Module) handleReceiveDelivery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, err := m.db.Begin(r.Context())
-	if err != nil {
-		nexus.Error(w, http.StatusInternalServerError, "could not start")
-		return
-	}
-	defer func() { _ = tx.Rollback(r.Context()) }()
-
-	// The run being unloaded. Locked, so two attendants confirming the same
-	// arrival at once queue behind each other rather than both proceeding.
+	// One call, one transaction: the receipt, the stock, the run's completion
+	// and the batch's running total, all inside petro_receive_trip.
+	//
+	// Through a function because those four rows belong to three different
+	// organisations whenever a depot company supplies somebody else's
+	// forecourt: the run to the sender, the batch to the importer, the tank and
+	// the receipt to the station. Under `tenant_isolation` the station could
+	// not see the run (404), and the sender receiving on the station's behalf
+	// failed at the tank (500) after its own depot had already been drawn down
+	// — litres on the road for ever. The function acts only for the
+	// organisation that owns the destination station, and writes the receipt
+	// and the stock under that organisation (migration 00016).
+	//
+	// The trip row is locked inside, so two attendants confirming the same
+	// arrival at once queue behind each other, and the unique index on trip_id
+	// refuses the second receipt.
 	var (
-		receipt Receipt
-		// A pointer, because the column is nullable: a station deleted while
-		// its delivery was on the road leaves to_station_id NULL (ON DELETE
-		// SET NULL). Scanning that into a plain string fails inside pgx,
-		// before the `== ""` check below could turn it into the 409 that was
-		// written for exactly this case — the driver got 500 "could not read
-		// the delivery" instead (audit §34).
-		stationID *string
+		receipt   Receipt
+		stationID string
 		batchID   *string
+		batchCode *string
 	)
-	err = tx.QueryRow(r.Context(), `
-		SELECT t.to_station_id::text, t.fuel_type, t.fuel_label, t.batch_id::text,
-		       COALESCE(s.name, '')
-		  FROM petro_dispatch_trips t
-		  LEFT JOIN petro_stations s ON s.id = t.to_station_id
-		 WHERE t.id = $1::uuid
-		   FOR UPDATE OF t`, tripID).
-		Scan(&stationID, &receipt.FuelType, &receipt.FuelLabel, &batchID, &receipt.StationName)
-	if errors.Is(err, pgx.ErrNoRows) {
+	err = m.db.QueryRow(r.Context(), `
+		SELECT receipt_id::text, receipt_at, receipt_station::text,
+		       COALESCE(receipt_station_name, ''), trip_fuel, trip_fuel_label,
+		       trip_batch::text, trip_batch_code, stock_after::float8
+		  FROM petro_receive_trip($1::uuid, $2, $3, $4, $5::uuid, $6)`,
+		tripID, request.Liters, request.ManifestLiters, request.SealStatus,
+		claims.UserID, request.Note).
+		Scan(&receipt.ID, &receipt.ReceivedAt, &stationID, &receipt.StationName,
+			&receipt.FuelType, &receipt.FuelLabel, &batchID, &batchCode,
+			&receipt.StockAfterLiters)
+	if isInsufficientPrivilege(err) {
 		nexus.Error(w, http.StatusNotFound, "ийм рейс олдсонгүй")
 		return
 	}
-	if err != nil {
-		nexus.Error(w, http.StatusInternalServerError, "could not read the delivery")
-		return
-	}
-	if stationID == nil || *stationID == "" {
+	if hasSQLState(err, "55000") {
+		// A station deleted while its delivery was on the road leaves
+		// to_station_id NULL (ON DELETE SET NULL, audit §34).
 		nexus.Error(w, http.StatusConflict, "энэ рейс аль ШТС рүү явахыг заагаагүй байна")
 		return
 	}
-
-	// The receipt. The unique index on trip_id is what refuses a second one —
-	// a conflict here means somebody already confirmed this arrival.
-	err = tx.QueryRow(r.Context(), `
-		INSERT INTO petro_station_receipts
-		       (tenant_id, station_id, trip_id, batch_id, fuel_type, liters,
-		        seal_status, manifest_liters, received_by, note)
-		VALUES ($1, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9::uuid, $10)
-		RETURNING id::text, received_at`,
-		tenantID, *stationID, tripID, batchID, receipt.FuelType, request.Liters,
-		request.SealStatus, request.ManifestLiters, claims.UserID, request.Note).
-		Scan(&receipt.ID, &receipt.ReceivedAt)
 	if isUniqueViolation(err) {
 		nexus.Error(w, http.StatusConflict, "энэ рейсийг аль хэдийн хүлээж авсан байна")
+		return
+	}
+	if isCheckViolation(err) {
+		nexus.Error(w, http.StatusConflict, "ШТС-ийн савны багтаамж хүрэлцэхгүй байна")
 		return
 	}
 	if err != nil {
 		nexus.Error(w, http.StatusInternalServerError, "could not record the delivery")
 		return
 	}
-
-	// Into the tank. The row is created if this forecourt has never carried
-	// this grade: a delivery of a fuel the station did not sell yesterday is an
-	// ordinary event, not an error.
-	err = tx.QueryRow(r.Context(), `
-		INSERT INTO petro_station_inventory
-		       (station_id, tenant_id, fuel_type, fuel_label, price_mnt,
-		        current_stock_liters, last_reported_at)
-		VALUES ($1::uuid, $2, $3, $4, 0, $5, NOW())
-		ON CONFLICT (station_id, fuel_type) DO UPDATE
-		   SET current_stock_liters = petro_station_inventory.current_stock_liters + $5,
-		       last_reported_at = NOW()
-		RETURNING current_stock_liters::float8`,
-		*stationID, tenantID, receipt.FuelType, receipt.FuelLabel, request.Liters).
-		Scan(&receipt.StockAfterLiters)
-	if err != nil {
-		nexus.Error(w, http.StatusInternalServerError, "could not add the fuel to the tank")
-		return
+	if batchCode != nil {
+		receipt.BatchCode = *batchCode
 	}
 
-	// The run is over.
-	if _, err := tx.Exec(r.Context(), `
-		UPDATE petro_dispatch_trips
-		   SET status = 'completed', completed_at = NOW(), updated_at = NOW()
-		 WHERE id = $1::uuid AND completed_at IS NULL`, tripID); err != nil {
-		nexus.Error(w, http.StatusInternalServerError, "could not close the delivery")
-		return
-	}
-
-	// And the batch knows how much of it has arrived somewhere. The gap between
-	// imported and received is the figure a regulator reads.
-	if batchID != nil {
-		if _, err := tx.Exec(r.Context(), `
-			UPDATE petro_batches
-			   SET received_liters = received_liters + $2, updated_at = NOW()
-			 WHERE id = $1::uuid`, *batchID, request.Liters); err != nil {
-			nexus.Error(w, http.StatusInternalServerError, "could not update the batch")
-			return
-		}
-		if err := tx.QueryRow(r.Context(),
-			`SELECT batch_code FROM petro_batches WHERE id = $1::uuid`, *batchID).
-			Scan(&receipt.BatchCode); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			nexus.Error(w, http.StatusInternalServerError, "could not read the batch")
-			return
-		}
-	}
-
-	if err := tx.Commit(r.Context()); err != nil {
-		nexus.Error(w, http.StatusInternalServerError, "could not save the delivery")
-		return
-	}
-
-	receipt.StationID = *stationID
+	receipt.StationID = stationID
 	receipt.TripID = &tripID
 	receipt.BatchID = batchID
 	receipt.Liters = request.Liters
