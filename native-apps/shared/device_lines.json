@@ -29,7 +29,7 @@
   ],
   "$provisioning": [
     "Дөрвүүлэн 2026-09-05-нд АСАВ. Одоогийн байдал:",
-    "  1. DNS   *.petronet.mn → 38.180.120.144 (wildcard, аль хэдийн байсан)",
+    "  1. DNS   *.petronet.mn → стекийн хост (wildcard, аль хэдийн байсан)",
     "  2. nginx nginx/device-lines.petronet.mn.conf → sites-available/-enabled",
     "  3. TLS   /etc/letsencrypt/live/desktop.petronet.mn (дөрвөн нэр, 2026-12-04 хүртэл)",
     "  4. API   DEVICE_LINE_ORIGINS → ALLOWED_ORIGINS (deploy/docker-compose.yml)",

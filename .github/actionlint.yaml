@@ -6,7 +6,7 @@
 # бол алдаа. Тиймээс шинэ runner нэмэхэд энэ жагсаалтад мөн нэмнэ.
 self-hosted-runner:
   labels:
-    # Windows build worker (38.180.136.249). Тэр машин дээр хөрш репогийн
+    # Windows build worker. Тэр машин дээр хөрш репогийн
     # runner зэрэгцэн ажилладаг тул шошго нь заавал — `self-hosted` дангаараа
     # хоёр репогийн ажлыг хольж явуулна. Дэлгэрэнгүй: docs/OPERATIONS.md.
     - petronet-win

@@ -8,7 +8,7 @@
 # Job нэрүүд (`macos`, `windows (…)`, `android`) нь main branch protection-д
 # required check болсон тул нэрийг нь workflow-оос салгаж өөрчилж болохгүй.
 #
-# Windows нь ӨӨРИЙН ТӨМӨР дээр ажиллана (`petronet-win`, 38.180.136.249) —
+# Windows нь ӨӨРИЙН ТӨМӨР дээр ажиллана (`petronet-win`) —
 # GitHub-ийн `windows-latest` дээр биш. Шалтгаан нь мөнгө биш: тэр машин дээр
 # WinUI-ийн XamlCompiler ажиллуулж чадах Windows SDK ба Build Tools суусан
 # бөгөөд бид тэдгээрийн хувилбарыг өөрсдөө барина. Мөн ижил машин дээр

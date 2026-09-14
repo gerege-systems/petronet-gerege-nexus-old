@@ -85,7 +85,7 @@ module migration history-тэй авч явна (`modules/petro/migrations/`).
 | Нэвтрэлт | Бие даасан — өөрийн нууц үг, өөрийн OIDC issuer. `SSO_CLIENT_ISSUER` хоосон |
 | Домэйн | `petronet.mn`, `www.petronet.mn` |
 | Портууд | 5440 / 8098 / 3018, зөвхөн loopback — **цөмийн анхдагч биш** |
-| Сервер | 38.180.120.144, ганцаараа |
+| Сервер | Тусдаа хост, ганцаараа |
 
 Портууд нь түүхэн сонголт: энэ хост дээр урьд нь хөрш систем зэрэгцэн ажиллаж
 3008/8082/5434-ийг эзэлж байсан. Тэр систем 2026-09-03-нд алга болж портууд
@@ -166,7 +166,7 @@ PetroNet нэг бүтээгдэхүүн шиг уншигдана.
 нь shell-ээс:
 
 ```bash
-ssh root@38.180.120.144 -t \
+ssh <host> -t \
   'docker exec -it gerege_petronet_backend /app/operator-bootstrap \
      -email та@жишээ.mn -name "Таны нэр"'
 ```
@@ -219,7 +219,7 @@ sh docs/mkdocs/build.sh plan   # plan.petronet.mn → docs/mkdocs/build-plan/sit
 
 ### Нууцууд
 
-`secrets.gerege.mn` дээрх **petronet-gerege-nexus** төслийн `prod` орчин нь
+Нууцын сан (Infisical) дээрх **petronet-gerege-nexus** төслийн `prod` орчин нь
 PetroNet System-ийн нууцуудын эх сурвалж: сангийн нууц үг, built-in клиентийн нууц,
 eID-ийн relying-party хос, Gerege Core-ийн токен, Grafana-гийн админ, ба
 нөөцлөлтийн age **нийтийн** түлхүүр.
@@ -257,7 +257,7 @@ PetroNet System-ийн нэрээр харагдах байв. Disk, санах 
 тул дэлгэц худал тоо биш, дутуу хэсэгтэй харагдана.
 
 ```bash
-ssh -L 9092:127.0.0.1:9092 root@38.180.120.144   # Prometheus-ыг өөрөө харах
+ssh -L 9092:127.0.0.1:9092 <host>   # Prometheus-ыг өөрөө харах
 ```
 
 ## Эхний байгууллага, эхний админ

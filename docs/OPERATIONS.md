@@ -97,7 +97,7 @@ deploy.yml  .env heredoc      X=${X}
 хоосон эсэхийг шалгаж, зөвхөн нэрийг хэвлэнэ — тавигдсаныг батлахын тулд
 утгыг нь echo хийдэг шалгалт бол түүнийг лог уншдаг бүх хүнд нийтэлсэн хэрэг.
 
-### Нууцын сан — secrets.gerege.mn
+### Нууцын сан — Infisical
 
 Нууцууд GitHub-ийн secret-ээс эсвэл **Infisical**-аас ирж болно. `deploy.yml`
 дахь утга бүр `${{ secrets.X || env.X }}` хэлбэртэй: GitHub-д байвал түүнийг,
@@ -118,7 +118,7 @@ deploy.yml  .env heredoc      X=${X}
 ```
 INFISICAL_IDENTITY_ID      machine identity-ийн ID
 INFISICAL_PROJECT_SLUG     төслийн slug
-INFISICAL_DOMAIN           анхдагч https://secrets.gerege.mn
+INFISICAL_DOMAIN           сангийн хаяг
 INFISICAL_ENV_SLUG         анхдагч prod
 INFISICAL_SECRET_PATH      анхдагч /
 ```
@@ -144,8 +144,8 @@ WinUI-ийн XamlCompiler ажиллуулахад Windows SDK ба Visual Studi
 
 | | |
 | --- | --- |
-| Хост | `38.180.136.249` (Windows 11 Pro, 4 цөм, 16 ГБ) |
-| Хандалт | SSH (OpenSSH), `administrator` |
+| Хост | Windows 11 Pro, 4 цөм, 16 ГБ |
+| Хандалт | SSH (OpenSSH) |
 | Runner | `petronet-win11`, шошго `petronet-win` |
 | Байрлал | `C:\actions-runner-petronet`, сервис нь `actions.runner.gerege-systems-petronet-gerege-nexus.petronet-win11` |
 | Сервисийн данс | `NT AUTHORITY\NETWORK SERVICE` — build хийхэд хангалттай, админ эрх хэрэггүй |

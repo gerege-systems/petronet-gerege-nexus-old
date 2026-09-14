@@ -156,7 +156,7 @@ Prometheus гурван зорилт цуглуулна: энэ бүтээгдэ
 
 ## Нууцууд
 
-`secrets.gerege.mn` дээрх **petronet-gerege-nexus / prod** төсөл нь эх
+Нууцын сан (Infisical) дээрх **petronet-gerege-nexus / prod** төсөл нь эх
 сурвалж; хостын `.env` нь түүний хуулбар. Долоо: сангийн нууц үг, built-in
 клиентийн нууц, eID-ийн хос, Gerege Core-ийн токен, Grafana-гийн админ, ба
 нөөцлөлтийн age нийтийн түлхүүр.
