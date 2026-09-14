@@ -188,6 +188,12 @@ func (m *Module) handleCreateDepot(w http.ResponseWriter, r *http.Request) {
 		nexus.Error(w, http.StatusBadRequest, "баазын нэр заавал шаардлагатай")
 		return
 	}
+	aimag, known := normalizeAimag(draft.Aimag)
+	if !known {
+		nexus.Error(w, http.StatusBadRequest, aimagMessage)
+		return
+	}
+	draft.Aimag = aimag
 
 	var depot Depot
 	err = m.db.QueryRow(r.Context(), `

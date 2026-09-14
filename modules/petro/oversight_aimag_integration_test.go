@@ -3,6 +3,7 @@ package petro
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/gerege-systems/open-gerege-nexus/backend/pkg/nexus"
@@ -126,5 +127,100 @@ func TestAProvinceBodySeesOnlyItsOwnProvince(t *testing.T) {
 	}
 	if n := findingsAbout(province, gobiInCapital); n != 0 {
 		t.Fatalf("the province body reads %d findings about a forecourt outside its province", n)
+	}
+
+	// Nor through the header: its counts are the rows the body can read, while
+	// the ministry still sees the submission as it was filed.
+	header := func(c *company) Submission {
+		t.Helper()
+		rec := c.call(t, c.module.handleReadSubmission, http.MethodGet,
+			"/report/submissions/x", nil, map[string]string{"id": gobiReport.Submission.ID})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("read submission: %d %s", rec.Code, rec.Body.String())
+		}
+		return decode[struct {
+			Submission Submission `json:"submission"`
+		}](t, rec).Submission
+	}
+	var visibleErrors, visibleWarnings int
+	if err := pool.QueryRow(nexus.WithWorkspaceID(context.Background(), province.tenantID), `
+		SELECT COUNT(*) FILTER (WHERE severity = 'error')::int,
+		       COUNT(*) FILTER (WHERE severity = 'warning')::int
+		  FROM petro_validation_findings WHERE submission_id = $1::uuid`,
+		gobiReport.Submission.ID).Scan(&visibleErrors, &visibleWarnings); err != nil {
+		t.Fatalf("count visible findings: %v", err)
+	}
+	if got := header(province); got.RowCount != 1 || got.ErrorCount != visibleErrors ||
+		got.WarningCount != visibleWarnings {
+		t.Fatalf("the province body's header reads %d rows, %d errors, %d warnings; want 1, %d, %d",
+			got.RowCount, got.ErrorCount, got.WarningCount, visibleErrors, visibleWarnings)
+	}
+	if got := header(ministry); got.RowCount != 2 || got.ErrorCount != gobiReport.Submission.ErrorCount {
+		t.Fatalf("the ministry's header reads %d rows, %d errors; want 2, %d",
+			got.RowCount, got.ErrorCount, gobiReport.Submission.ErrorCount)
+	}
+	// Otherwise the checks below would pass on the stored figures too.
+	if gobiReport.Submission.RowCount == 1 || gobiReport.Submission.ErrorCount == visibleErrors {
+		t.Fatalf("the stored header (%d rows, %d errors) equals what the province sees (1, %d); the test proves nothing",
+			gobiReport.Submission.RowCount, gobiReport.Submission.ErrorCount, visibleErrors)
+	}
+
+	// The same header on the two lists that carry it.
+	inList := func(rec *httptest.ResponseRecorder, where string) Submission {
+		t.Helper()
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: %d %s", where, rec.Code, rec.Body.String())
+		}
+		for _, s := range decode[struct {
+			Submissions []Submission `json:"submissions"`
+		}](t, rec).Submissions {
+			if s.ID == gobiReport.Submission.ID {
+				return s
+			}
+		}
+		t.Fatalf("%s: the Gobi submission is missing", where)
+		return Submission{}
+	}
+	for where, got := range map[string]Submission{
+		"review queue": inList(province.call(t, province.module.handleReviewQueue, http.MethodGet,
+			"/oversight/queue?status="+gobiReport.Submission.Status, nil, nil), "review queue"),
+		"history": inList(province.call(t, province.module.handleListSubmissions, http.MethodGet,
+			"/report/submissions", nil, nil), "history"),
+	} {
+		if got.RowCount != 1 || got.ErrorCount != visibleErrors || got.WarningCount != visibleWarnings {
+			t.Fatalf("%s: the province body reads %d rows, %d errors, %d warnings; want 1, %d, %d",
+				where, got.RowCount, got.ErrorCount, got.WarningCount, visibleErrors, visibleWarnings)
+		}
+	}
+
+	// "My submission" on the period list is the caller's own. Both bodies can
+	// read the Gobi company's submission for this period and filed none.
+	for _, body := range []*company{province, ministry} {
+		rec := body.call(t, body.module.handleListPeriods, http.MethodGet, "/report/periods?limit=120", nil, nil)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("periods: %d %s", rec.Code, rec.Body.String())
+		}
+		for _, p := range decode[struct {
+			Periods []Period `json:"periods"`
+		}](t, rec).Periods {
+			if p.ID == period && p.MySubmission != nil {
+				t.Fatalf("an oversight body's period shows submission %s as its own", p.MySubmission.ID)
+			}
+		}
+	}
+	rec = gobi.call(t, gobi.module.handleListPeriods, http.MethodGet, "/report/periods?limit=120", nil, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("periods: %d %s", rec.Code, rec.Body.String())
+	}
+	found := false
+	for _, p := range decode[struct {
+		Periods []Period `json:"periods"`
+	}](t, rec).Periods {
+		if p.ID == period {
+			found = p.MySubmission != nil && p.MySubmission.ID == gobiReport.Submission.ID
+		}
+	}
+	if !found {
+		t.Fatal("the Gobi company's own period list lost its submission")
 	}
 }

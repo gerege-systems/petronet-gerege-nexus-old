@@ -101,8 +101,8 @@ func (m *Module) handleReviewQueue(w http.ResponseWriter, r *http.Request) {
 
 	rows, err := m.db.Query(r.Context(), `
 		SELECT s.id::text, s.period_id::text, s.tenant_id::text, t.name, s.version, s.status,
-		       s.source, s.row_count, s.error_count, s.warning_count,
-		       s.submitted_at::text, s.reviewed_at::text, s.review_note,
+		       s.source,`+submissionCountsSQL+`,
+		       s.submitted_at::text, s.reviewed_at::text,`+submissionReviewNoteSQL+`,
 		       p.period_start::text, p.period_end::text
 		  FROM petro_report_submissions s
 		  JOIN petro_report_periods p ON p.id = s.period_id

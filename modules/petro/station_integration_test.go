@@ -204,3 +204,41 @@ func TestAMalformedIdIsRefused(t *testing.T) {
 		}
 	}
 }
+
+// A province is chosen from the register's list. «Дорноговь аймаг» is the same
+// place as «Дорноговь» to a person and a different key to the province body
+// that reads by it, so the form's spelling is the only one stored.
+func TestAProvinceOffTheListIsRefused(t *testing.T) {
+	pool := openFuelPool(t)
+	company := newCompany(t, pool, "offlist")
+	lat, lon := 44.89, 110.12
+
+	rec := company.call(t, company.module.handleCreateStation, http.MethodPost, "/stations",
+		StationDraft{Name: "Жагсаалтгүй ШТС", Brand: "test", Aimag: "Дорноговь аймаг", Lat: &lat, Lon: &lon}, nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("a station off the list: %d %s, want 400", rec.Code, rec.Body.String())
+	}
+
+	rec = company.call(t, company.module.handleCreateDepot, http.MethodPost, "/depots",
+		DepotDraft{Name: "Жагсаалтгүй бааз", Aimag: "Gobi"}, nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("a depot off the list: %d %s, want 400", rec.Code, rec.Body.String())
+	}
+
+	rec = company.call(t, company.module.handleCreateStation, http.MethodPost, "/stations",
+		StationDraft{Name: "Жагсаалттай ШТС", Brand: "test", Aimag: " Дорноговь ", Lat: &lat, Lon: &lon}, nil)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("a listed station: %d %s", rec.Code, rec.Body.String())
+	}
+	station := decode[Station](t, rec)
+	if station.Aimag != "Дорноговь" {
+		t.Fatalf("stored aimag %q, want the trimmed list name", station.Aimag)
+	}
+
+	bad := "Дорноговь аймаг"
+	rec = company.call(t, company.module.handleUpdateStation, http.MethodPatch, "/stations/x",
+		StationPatch{Aimag: &bad}, map[string]string{"id": station.ID})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("an update off the list: %d %s, want 400", rec.Code, rec.Body.String())
+	}
+}

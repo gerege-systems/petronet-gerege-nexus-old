@@ -99,6 +99,12 @@ func (m *Module) handleCreateStation(w http.ResponseWriter, r *http.Request) {
 		nexus.Error(w, http.StatusBadRequest, "байршил (өргөрөг, уртраг) заавал шаардлагатай")
 		return
 	}
+	aimag, known := normalizeAimag(draft.Aimag)
+	if !known {
+		nexus.Error(w, http.StatusBadRequest, aimagMessage)
+		return
+	}
+	draft.Aimag = aimag
 	voucherOpen := true
 	if draft.VoucherOpen != nil {
 		voucherOpen = *draft.VoucherOpen
@@ -185,6 +191,14 @@ func (m *Module) handleUpdateStation(w http.ResponseWriter, r *http.Request) {
 	if !isUUID(stationID) {
 		nexus.Error(w, http.StatusBadRequest, "id буруу хэлбэртэй байна")
 		return
+	}
+	if patch.Aimag != nil {
+		aimag, known := normalizeAimag(*patch.Aimag)
+		if !known {
+			nexus.Error(w, http.StatusBadRequest, aimagMessage)
+			return
+		}
+		patch.Aimag = &aimag
 	}
 
 	var station Station

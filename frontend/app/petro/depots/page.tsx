@@ -21,6 +21,7 @@ import { Droplets, Loader2, Plus, Train, Warehouse } from "lucide-react";
 
 import { api, type Depot, type Shipment, type Tank } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { AIMAGS } from "@/lib/petro/aimags";
 import {
   ErrorNote,
   Field,
@@ -257,11 +258,16 @@ function DepotForm({ onCancel, onDone }: { onCancel: () => void; onDone: () => v
           />
         </Field>
         <Field label={t("petro.depot.aimag")}>
-          <input
+          <select
             className={inputClass}
             value={form.aimag}
             onChange={(e) => setForm({ ...form, aimag: e.target.value })}
-          />
+          >
+            <option value="">—</option>
+            {AIMAGS.map((aimag) => (
+              <option key={aimag}>{aimag}</option>
+            ))}
+          </select>
         </Field>
         <Field label={t("petro.depot.rail_code")}>
           <input
