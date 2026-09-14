@@ -141,7 +141,246 @@ CREATE INDEX IF NOT EXISTS idx_petro_validation_findings_line ON petro_validatio
 CREATE INDEX IF NOT EXISTS idx_petro_validation_findings_tenant ON petro_validation_findings (tenant_id);
 CREATE INDEX IF NOT EXISTS idx_petro_vouchers_tenant ON petro_vouchers (tenant_id);
 
+-- Маргааны тэмдэглэл хуучин тэмдэглэл дээр залгагддаг: тус бүр нь 4000-д
+-- багтсан ч нийлбэр нь хэтэрч, дээрх CHECK-ээр 23514 болж хөдөлгөөнийг цаашид
+-- маргах боломжгүй болгоно. Сүүлийн 4000 тэмдэгтийг үлдээнэ — шинэ шалтгаан
+-- нь хамгийн сүүлд, түүнийг хаяхгүй.
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION petro_dispute_movement(movement UUID, dispute_note TEXT)
+RETURNS TEXT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = workspace, registry, pg_catalog, pg_temp
+AS $$
+DECLARE
+    ref TEXT;
+BEGIN
+    IF petro_oversight_scope() IS DISTINCT FROM 'national' THEN
+        RAISE EXCEPTION 'not a national oversight body' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    IF COALESCE(dispute_note, '') = '' THEN
+        RAISE EXCEPTION 'a dispute needs a reason' USING ERRCODE = 'check_violation';
+    END IF;
+
+    UPDATE petro_movements m
+       SET status = 'disputed',
+           note = right(m.note || CASE WHEN m.note = '' THEN '' ELSE ' · ' END || dispute_note, 4000)
+     WHERE m.id = movement AND m.status IN ('open', 'closed')
+    RETURNING m.national_ref INTO ref;
+
+    RETURN ref;
+END;
+$$;
+-- +goose StatementEnd
+
+-- Өдрийн нэгтгэлийг зэрэг хоёр удаа тооцоолох (replica бүрийн цагийн ажил ба
+-- «дахин тооцоол» товч) нь DELETE + INSERT хоёрын хооронд PK зөрчил (23505)
+-- өгч нэгийг нь унагадаг байв. Өдөр тутмын advisory lock нь тэднийг дараалуулна.
+-- Биеийг 00016-аас хуулав; нэмэгдсэн нь зөвхөн PERFORM мөр.
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION petro_refresh_daily(for_day DATE)
+RETURNS INT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = workspace, registry, pg_catalog, pg_temp
+AS $$
+DECLARE
+    written INT;
+BEGIN
+    -- Тенантгүй дуудлага нь хуваарьт ажил; тенанттай дуудлага нь зөвхөн
+    -- үндэсний хяналтын байгууллагынх.
+    IF COALESCE(NULLIF(current_setting('app.current_tenant', true), ''), '') <> ''
+       AND petro_oversight_scope() IS DISTINCT FROM 'national' THEN
+        RAISE EXCEPTION 'not a national oversight body' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    PERFORM pg_advisory_xact_lock(hashtext('petro_refresh_daily'), for_day - DATE '2000-01-01');
+
+    DELETE FROM petro_daily_national WHERE day = for_day;
+
+    WITH day_lines AS (
+        SELECT DISTINCT ON (l.site_kind, l.site_id, l.product_code)
+               l.site_kind, l.site_id, l.product_code,
+               l.closing_liters, l.closing_liters_15c, l.receipts_liters, l.sales_liters
+          FROM petro_report_lines l
+          JOIN petro_report_submissions s ON s.id = l.submission_id
+          JOIN petro_report_periods p ON p.id = s.period_id
+         WHERE p.period_start = for_day
+           AND s.status IN ('submitted', 'approved')
+         ORDER BY l.site_kind, l.site_id, l.product_code, s.version DESC
+    ),
+    week_sales AS (
+        SELECT l.site_kind, l.site_id, l.product_code, AVG(l.sales_liters) AS avg_sales
+          FROM petro_report_lines l
+          JOIN petro_report_submissions s ON s.id = l.submission_id
+          JOIN petro_report_periods p ON p.id = s.period_id
+         WHERE p.period_start BETWEEN (for_day - 6) AND for_day
+           AND s.status IN ('submitted', 'approved')
+         GROUP BY l.site_kind, l.site_id, l.product_code
+    ),
+    site_aimag AS (
+        SELECT 'station'::text AS site_kind, id AS site_id,
+               COALESCE(NULLIF(aimag, ''), '—') AS aimag
+          FROM petro_stations WHERE registry_status <> 'closed'
+        UNION ALL
+        SELECT 'depot', id, COALESCE(NULLIF(aimag, ''), '—')
+          FROM petro_depots WHERE registry_status <> 'closed'
+    ),
+    site_products AS (
+        SELECT 'station'::text AS site_kind, station_id AS site_id, fuel_type AS product_code,
+               tank_capacity_liters AS capacity_liters
+          FROM petro_station_inventory
+        UNION ALL
+        SELECT 'depot', depot_id, fuel_type, SUM(capacity_liters)
+          FROM petro_depot_tanks GROUP BY 1, 2, 3
+    ),
+    expected AS (
+        SELECT sp.site_kind, sp.site_id, sp.product_code, sa.aimag, sp.capacity_liters
+          FROM site_products sp
+          JOIN site_aimag sa ON sa.site_kind = sp.site_kind AND sa.site_id = sp.site_id
+          JOIN petro_products pr ON pr.code = sp.product_code
+    )
+    INSERT INTO petro_daily_national
+           (day, product_code, aimag, stock_liters, capacity_liters, receipts_liters,
+            sales_liters, sites_total, sites_reported, days_of_supply, refreshed_at)
+    SELECT for_day, e.product_code, e.aimag,
+           COALESCE(SUM(COALESCE(d.closing_liters_15c, d.closing_liters)), 0),
+           COALESCE(SUM(e.capacity_liters), 0),
+           COALESCE(SUM(d.receipts_liters), 0),
+           COALESCE(SUM(d.sales_liters), 0),
+           COUNT(*), COUNT(d.site_id),
+           CASE WHEN COALESCE(SUM(w.avg_sales), 0) > 0
+                THEN COALESCE(SUM(COALESCE(d.closing_liters_15c, d.closing_liters)), 0)
+                     / SUM(w.avg_sales) END,
+           NOW()
+      FROM expected e
+      LEFT JOIN day_lines d
+             ON d.site_kind = e.site_kind AND d.site_id = e.site_id
+            AND d.product_code = e.product_code
+      LEFT JOIN week_sales w
+             ON w.site_kind = e.site_kind AND w.site_id = e.site_id
+            AND w.product_code = e.product_code
+     GROUP BY e.product_code, e.aimag;
+
+    GET DIAGNOSTICS written = ROW_COUNT;
+    RETURN written;
+END;
+$$;
+-- +goose StatementEnd
+
 -- +goose Down
+
+-- Хоёр функцийг 00016-ийн хэлбэрт нь буцаана (CREATE OR REPLACE эрхийг хадгална).
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION petro_dispute_movement(movement UUID, dispute_note TEXT)
+RETURNS TEXT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = workspace, registry, pg_catalog, pg_temp
+AS $$
+DECLARE
+    ref TEXT;
+BEGIN
+    IF petro_oversight_scope() IS DISTINCT FROM 'national' THEN
+        RAISE EXCEPTION 'not a national oversight body' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    IF COALESCE(dispute_note, '') = '' THEN
+        RAISE EXCEPTION 'a dispute needs a reason' USING ERRCODE = 'check_violation';
+    END IF;
+
+    UPDATE petro_movements m
+       SET status = 'disputed',
+           note = m.note || CASE WHEN m.note = '' THEN '' ELSE ' · ' END || dispute_note
+     WHERE m.id = movement AND m.status IN ('open', 'closed')
+    RETURNING m.national_ref INTO ref;
+
+    RETURN ref;
+END;
+$$;
+-- +goose StatementEnd
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION petro_refresh_daily(for_day DATE)
+RETURNS INT
+LANGUAGE plpgsql VOLATILE SECURITY DEFINER
+SET search_path = workspace, registry, pg_catalog, pg_temp
+AS $$
+DECLARE
+    written INT;
+BEGIN
+    IF COALESCE(NULLIF(current_setting('app.current_tenant', true), ''), '') <> ''
+       AND petro_oversight_scope() IS DISTINCT FROM 'national' THEN
+        RAISE EXCEPTION 'not a national oversight body' USING ERRCODE = 'insufficient_privilege';
+    END IF;
+
+    DELETE FROM petro_daily_national WHERE day = for_day;
+
+    WITH day_lines AS (
+        SELECT DISTINCT ON (l.site_kind, l.site_id, l.product_code)
+               l.site_kind, l.site_id, l.product_code,
+               l.closing_liters, l.closing_liters_15c, l.receipts_liters, l.sales_liters
+          FROM petro_report_lines l
+          JOIN petro_report_submissions s ON s.id = l.submission_id
+          JOIN petro_report_periods p ON p.id = s.period_id
+         WHERE p.period_start = for_day
+           AND s.status IN ('submitted', 'approved')
+         ORDER BY l.site_kind, l.site_id, l.product_code, s.version DESC
+    ),
+    week_sales AS (
+        SELECT l.site_kind, l.site_id, l.product_code, AVG(l.sales_liters) AS avg_sales
+          FROM petro_report_lines l
+          JOIN petro_report_submissions s ON s.id = l.submission_id
+          JOIN petro_report_periods p ON p.id = s.period_id
+         WHERE p.period_start BETWEEN (for_day - 6) AND for_day
+           AND s.status IN ('submitted', 'approved')
+         GROUP BY l.site_kind, l.site_id, l.product_code
+    ),
+    site_aimag AS (
+        SELECT 'station'::text AS site_kind, id AS site_id,
+               COALESCE(NULLIF(aimag, ''), '—') AS aimag
+          FROM petro_stations WHERE registry_status <> 'closed'
+        UNION ALL
+        SELECT 'depot', id, COALESCE(NULLIF(aimag, ''), '—')
+          FROM petro_depots WHERE registry_status <> 'closed'
+    ),
+    site_products AS (
+        SELECT 'station'::text AS site_kind, station_id AS site_id, fuel_type AS product_code,
+               tank_capacity_liters AS capacity_liters
+          FROM petro_station_inventory
+        UNION ALL
+        SELECT 'depot', depot_id, fuel_type, SUM(capacity_liters)
+          FROM petro_depot_tanks GROUP BY 1, 2, 3
+    ),
+    expected AS (
+        SELECT sp.site_kind, sp.site_id, sp.product_code, sa.aimag, sp.capacity_liters
+          FROM site_products sp
+          JOIN site_aimag sa ON sa.site_kind = sp.site_kind AND sa.site_id = sp.site_id
+          JOIN petro_products pr ON pr.code = sp.product_code
+    )
+    INSERT INTO petro_daily_national
+           (day, product_code, aimag, stock_liters, capacity_liters, receipts_liters,
+            sales_liters, sites_total, sites_reported, days_of_supply, refreshed_at)
+    SELECT for_day, e.product_code, e.aimag,
+           COALESCE(SUM(COALESCE(d.closing_liters_15c, d.closing_liters)), 0),
+           COALESCE(SUM(e.capacity_liters), 0),
+           COALESCE(SUM(d.receipts_liters), 0),
+           COALESCE(SUM(d.sales_liters), 0),
+           COUNT(*), COUNT(d.site_id),
+           CASE WHEN COALESCE(SUM(w.avg_sales), 0) > 0
+                THEN COALESCE(SUM(COALESCE(d.closing_liters_15c, d.closing_liters)), 0)
+                     / SUM(w.avg_sales) END,
+           NOW()
+      FROM expected e
+      LEFT JOIN day_lines d
+             ON d.site_kind = e.site_kind AND d.site_id = e.site_id
+            AND d.product_code = e.product_code
+      LEFT JOIN week_sales w
+             ON w.site_kind = e.site_kind AND w.site_id = e.site_id
+            AND w.product_code = e.product_code
+     GROUP BY e.product_code, e.aimag;
+
+    GET DIAGNOSTICS written = ROW_COUNT;
+    RETURN written;
+END;
+$$;
+-- +goose StatementEnd
 
 DROP INDEX IF EXISTS idx_petro_vouchers_tenant;
 DROP INDEX IF EXISTS idx_petro_validation_findings_tenant;

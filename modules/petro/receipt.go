@@ -116,6 +116,10 @@ func (m *Module) handleReceiveDelivery(w http.ResponseWriter, r *http.Request) {
 		nexus.Error(w, http.StatusBadRequest, "лацны төлөв танигдахгүй байна")
 		return
 	}
+	if noteTooLong(request.Note) {
+		nexus.Error(w, http.StatusBadRequest, noteTooLongMessage)
+		return
+	}
 
 	// One call, one transaction: the receipt, the stock, the run's completion
 	// and the batch's running total, all inside petro_receive_trip.
@@ -163,8 +167,14 @@ func (m *Module) handleReceiveDelivery(w http.ResponseWriter, r *http.Request) {
 		nexus.Error(w, http.StatusConflict, "энэ рейсийг аль хэдийн хүлээж авсан байна")
 		return
 	}
-	if isCheckViolation(err) {
+	// Only the capacity constraint is the tank being full. Any other CHECK is
+	// a value the request should not have carried.
+	if isCheckViolation(err) && violatedConstraint(err) == "station_stock_within_capacity" {
 		nexus.Error(w, http.StatusConflict, "ШТС-ийн савны багтаамж хүрэлцэхгүй байна")
+		return
+	}
+	if isCheckViolation(err) {
+		nexus.Error(w, http.StatusBadRequest, "хүлээн авалтын утга зөвшөөрөгдөөгүй байна")
 		return
 	}
 	if err != nil {
