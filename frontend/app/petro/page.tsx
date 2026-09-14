@@ -23,6 +23,7 @@ import { Fuel, Loader2, MapPin, Pencil, Phone, Plus, Ticket, Trash2 } from "luci
 
 import { api, type FuelStation, type StationGrade } from "@/lib/api";
 import { useI18n } from "@/lib/i18n";
+import { AIMAGS } from "@/lib/petro/aimags";
 import {
   ErrorNote,
   Field,
@@ -565,11 +566,16 @@ function StationForm({
           />
         </Field>
         <Field label={t("petro.station.aimag")}>
-          <input
+          <select
             className={inputClass}
             value={form.aimag}
             onChange={(event) => setForm({ ...form, aimag: event.target.value })}
-          />
+          >
+            <option value="">—</option>
+            {AIMAGS.map((aimag) => (
+              <option key={aimag}>{aimag}</option>
+            ))}
+          </select>
         </Field>
         <Field label={t("petro.station.district")}>
           <input

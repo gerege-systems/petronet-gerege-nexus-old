@@ -310,14 +310,16 @@ func defaultTo(value, fallback string) string {
 // province, produced a breakdown of a country that does not exist (audit §14).
 //
 // The rule is the country's own: a name ending in "аймаг" is a province, and
-// anything else is a district of the capital.
+// anything else is a district of the capital. The suffix is dropped so the
+// stored name is the register's own — «Архангай», as modules/petro.Aimags and
+// the station form spell it — and a province body reading by name finds it.
 func aimagOf(place string) string {
 	place = strings.TrimSpace(place)
 	if place == "" {
 		return ""
 	}
 	if strings.HasSuffix(place, "аймаг") {
-		return place
+		return strings.TrimSpace(strings.TrimSuffix(place, "аймаг"))
 	}
 	return "Улаанбаатар"
 }

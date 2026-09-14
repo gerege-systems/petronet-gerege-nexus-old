@@ -127,4 +127,35 @@ func TestAProvinceBodySeesOnlyItsOwnProvince(t *testing.T) {
 	if n := findingsAbout(province, gobiInCapital); n != 0 {
 		t.Fatalf("the province body reads %d findings about a forecourt outside its province", n)
 	}
+
+	// Nor through the header: its counts are the rows the body can read, while
+	// the ministry still sees the submission as it was filed.
+	header := func(c *company) Submission {
+		t.Helper()
+		rec := c.call(t, c.module.handleReadSubmission, http.MethodGet,
+			"/report/submissions/x", nil, map[string]string{"id": gobiReport.Submission.ID})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("read submission: %d %s", rec.Code, rec.Body.String())
+		}
+		return decode[struct {
+			Submission Submission `json:"submission"`
+		}](t, rec).Submission
+	}
+	var visibleErrors, visibleWarnings int
+	if err := pool.QueryRow(nexus.WithWorkspaceID(context.Background(), province.tenantID), `
+		SELECT COUNT(*) FILTER (WHERE severity = 'error')::int,
+		       COUNT(*) FILTER (WHERE severity = 'warning')::int
+		  FROM petro_validation_findings WHERE submission_id = $1::uuid`,
+		gobiReport.Submission.ID).Scan(&visibleErrors, &visibleWarnings); err != nil {
+		t.Fatalf("count visible findings: %v", err)
+	}
+	if got := header(province); got.RowCount != 1 || got.ErrorCount != visibleErrors ||
+		got.WarningCount != visibleWarnings {
+		t.Fatalf("the province body's header reads %d rows, %d errors, %d warnings; want 1, %d, %d",
+			got.RowCount, got.ErrorCount, got.WarningCount, visibleErrors, visibleWarnings)
+	}
+	if got := header(ministry); got.RowCount != 2 || got.ErrorCount != gobiReport.Submission.ErrorCount {
+		t.Fatalf("the ministry's header reads %d rows, %d errors; want 2, %d",
+			got.RowCount, got.ErrorCount, gobiReport.Submission.ErrorCount)
+	}
 }
