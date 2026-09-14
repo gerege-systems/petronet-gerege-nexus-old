@@ -57,7 +57,7 @@ steps:
     method: POST
     path: /api/v1/petro/movements/${movement_id}/receive
     body:
-      liters: 24850
+      received_liters: 24850
       note: "TSM — 150 литрийн зөрүү зориудаар"
     expect:
       status: [200, 201]

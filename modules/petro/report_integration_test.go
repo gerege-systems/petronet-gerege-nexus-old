@@ -465,14 +465,16 @@ func TestADeliveryToAnotherCompanysStationIsReceivedByThatCompany(t *testing.T) 
 	trip := decode[Dispatch](t, rec)
 
 	// The load carries the batch its importer minted at clearing — the
-	// supplier's row, a third party's to the station. The dispatch handler does
-	// not attach it yet, so it is attached here to exercise that branch.
+	// supplier's row, a third party's to the station — and the dispatch took it
+	// from the tank the consignment was unloaded into.
 	var batchCode string
 	if err := pool.QueryRow(context.Background(), `
-		WITH b AS (SELECT id, batch_code FROM petro_batches WHERE customs_shipment_id = $2::uuid)
-		UPDATE petro_dispatch_trips SET batch_id = (SELECT id FROM b) WHERE id = $1::uuid
-		RETURNING (SELECT batch_code FROM b)`, trip.TripID, shipmentID).Scan(&batchCode); err != nil {
-		t.Fatalf("attach the batch: %v", err)
+		SELECT b.batch_code
+		  FROM petro_dispatch_trips d
+		  JOIN petro_batches b ON b.id = d.batch_id
+		 WHERE d.id = $1::uuid AND b.customs_shipment_id = $2::uuid`,
+		trip.TripID, shipmentID).Scan(&batchCode); err != nil {
+		t.Fatalf("the dispatch did not carry the tank's batch: %v", err)
 	}
 
 	// The sender cannot sign for the other company's forecourt.

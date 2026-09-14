@@ -172,6 +172,23 @@ func (m *Module) handleDispatchFromDepot(w http.ResponseWriter, r *http.Request)
 	}
 	out.Liters = draft.Liters
 
+	// The load carries its batch only when the tank has only ever held one, so
+	// a forecourt's receipt adds to the right importer's total. A tank that has
+	// blended two batches, or took fuel with none, carries NULL: receipts do not
+	// record the level they topped up, so the blend cannot be apportioned, and
+	// crediting all of it to the latest batch would be a confident wrong answer.
+	var batchID *string
+	if err := tx.QueryRow(r.Context(), `
+		SELECT CASE WHEN COUNT(*) > 0
+		             AND COUNT(*) = COUNT(batch_id)
+		             AND COUNT(DISTINCT batch_id) = 1
+		            THEN (array_agg(batch_id))[1]::text END
+		  FROM petro_depot_receipts
+		 WHERE tank_id = $1::uuid`, draft.TankID).Scan(&batchID); err != nil {
+		nexus.Error(w, http.StatusInternalServerError, "could not read the tank's batch")
+		return
+	}
+
 	code := draft.TripCode
 	if code == "" {
 		code = nationalRef(nexus.Now())
@@ -188,12 +205,12 @@ func (m *Module) handleDispatchFromDepot(w http.ResponseWriter, r *http.Request)
 		INSERT INTO petro_dispatch_trips
 		       (tenant_id, trip_code, tanker_plate, driver_name, driver_phone,
 		        to_station_id, fuel_type, fuel_label, volume_liters, seal_no,
-		        from_depot_id, from_tank_id, status)
-		VALUES ($1, $2, $3, $4, $5, $6::uuid, $7, $8, $9, $10, $11::uuid, $12::uuid, 'in_transit')
+		        from_depot_id, from_tank_id, batch_id, status)
+		VALUES ($1, $2, $3, $4, $5, $6::uuid, $7, $8, $9, $10, $11::uuid, $12::uuid, $13::uuid, 'in_transit')
 		RETURNING id::text`,
 		tenantID, code, draft.TankerPlate, draft.DriverName, draft.DriverPhone,
 		station, out.FuelType, fuelLabel(out.FuelType), draft.Liters, draft.SealNo,
-		depotID, draft.TankID).Scan(&out.TripID)
+		depotID, draft.TankID, batchID).Scan(&out.TripID)
 	if err != nil {
 		nexus.Error(w, http.StatusInternalServerError, "could not record the trip")
 		return
