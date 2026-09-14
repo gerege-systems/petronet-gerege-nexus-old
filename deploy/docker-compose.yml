@@ -126,6 +126,10 @@ services:
       # request that arrived on any other name, and the shell answers 404 to
       # /cp. Empty in production means this deployment has no console at all.
       CONTROL_PLANE_HOST: ${CONTROL_PLANE_HOST:-}
+      # Authenticator апп дээр консолын кодын хажууд харагдах нэр. Консолын
+      # «Тохиргоо» хуудаснаас (console.totp_issuer) өөрчилж болно — тэр нь энэ
+      # утгыг дийлнэ. Зөвхөн шинээр бүртгүүлэх операторт хамаарна.
+      CONTROL_PLANE_TOTP_ISSUER: ${CONTROL_PLANE_TOTP_ISSUER:-admin.petronet.mn}
 
       # OIDC-ээр нэвтэрсэн хүнийг эргүүлж явуулж болох хостууд.
       #
