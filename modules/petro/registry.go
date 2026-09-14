@@ -38,6 +38,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"github.com/gerege-systems/open-gerege-nexus/backend/pkg/nexus"
 	"github.com/go-chi/chi/v5"
@@ -313,6 +314,13 @@ func (m *Module) handleOversightBodies(w http.ResponseWriter, r *http.Request) {
 		if !oversightScopes[body.Scope] {
 			nexus.Error(w, http.StatusBadRequest,
 				"хамрах хүрээ нь national, tax, customs, aimag, audit-ийн нэг байна")
+			return
+		}
+		// A province body with no province sees nothing (migration 00018) —
+		// refused here rather than appointed into an empty screen.
+		body.Aimag = strings.TrimSpace(body.Aimag)
+		if body.Scope == "aimag" && body.Aimag == "" {
+			nexus.Error(w, http.StatusBadRequest, "аймгийн хяналтын байгууллагад аймгийг заана уу")
 			return
 		}
 		if !isUUID(body.TenantID) {
