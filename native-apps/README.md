@@ -128,7 +128,7 @@ python3 scripts/gen_from_swift.py                 # өнгө/орчуулгыг 
 ажиллуулна. CI: `.github/workflows/native-clients.yml` дөрвүүлэнг компайл хийнэ.
 
 macOS, iOS, Android гурав GitHub-ийн үүлэн runner дээр; **Windows нь өөрийн
-төмөр дээр** (`petronet-win`, 38.180.136.249) — WinUI-ийн XamlCompiler
+төмөр дээр** (`petronet-win`) — WinUI-ийн XamlCompiler
 ажиллуулахад Windows SDK ба Build Tools хэрэгтэй. Дэлгэрэнгүй ба
 хамгаалалтын дүрэм: [Ажиллагаа § CI-ийн Windows worker](../docs/OPERATIONS.md#ci-ийн-windows-worker).
 
