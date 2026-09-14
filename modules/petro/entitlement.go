@@ -252,22 +252,7 @@ func (m *Module) handleIssueVoucher(w http.ResponseWriter, r *http.Request) {
 	// Expire anything of this citizen's that has run out, before the balance is
 	// read. An unused voucher holds ration that should come back to them, and
 	// the moment it comes back is the moment they next ask for one.
-	if _, err := tx.Exec(r.Context(), `
-		UPDATE petro_entitlements e
-		   SET used_mnt = GREATEST(0, e.used_mnt - expired.amount), updated_at = NOW()
-		  FROM (
-		      SELECT for_date, SUM(amount_mnt) AS amount
-		        FROM petro_vouchers
-		       WHERE citizen_id = $1 AND status = 'active' AND expires_at <= NOW()
-		       GROUP BY for_date
-		  ) AS expired
-		 WHERE e.citizen_id = $1 AND e.for_date = expired.for_date`, citizenID); err != nil {
-		nexus.Error(w, http.StatusInternalServerError, "could not settle expired vouchers")
-		return
-	}
-	if _, err := tx.Exec(r.Context(), `
-		UPDATE petro_vouchers SET status = 'expired'
-		 WHERE citizen_id = $1 AND status = 'active' AND expires_at <= NOW()`, citizenID); err != nil {
+	if _, err := tx.Exec(r.Context(), settleExpiredSQL, citizenID); err != nil {
 		nexus.Error(w, http.StatusInternalServerError, "could not settle expired vouchers")
 		return
 	}
@@ -421,34 +406,32 @@ func voucherToken() (string, error) {
 	return base64.RawURLEncoding.EncodeToString(raw), nil
 }
 
+// settleExpiredSQL expires a citizen's run-out vouchers and gives back what
+// they held, in one statement.
+//
+// It used to be two: sum the active-but-expired vouchers into the refund, then
+// flip them to expired. Two requests at once both summed the same vouchers —
+// the second waited on the entitlement row, re-checked only that row, and
+// subtracted the stale sum again — so the ration came back twice. Refunding
+// exactly the rows this statement itself flipped (RETURNING) makes the second
+// request find nothing left to refund.
+const settleExpiredSQL = `
+	WITH expired AS (
+	    UPDATE petro_vouchers SET status = 'expired'
+	     WHERE citizen_id = $1 AND status = 'active' AND expires_at <= NOW()
+	    RETURNING for_date, amount_mnt
+	)
+	UPDATE petro_entitlements e
+	   SET used_mnt = GREATEST(e.used_mnt - x.amount, 0), updated_at = NOW()
+	  FROM (SELECT for_date, SUM(amount_mnt) AS amount FROM expired GROUP BY for_date) AS x
+	 WHERE e.citizen_id = $1 AND e.for_date = x.for_date`
+
 // settleExpiredVouchers gives back what an unspent voucher held.
 //
 // Lifted out of the issue path so the read can run it too — the two callers
-// need the same three statements, and a copy would be a second definition of
-// what "expired" means to an entitlement.
+// share settleExpiredSQL, and a copy would be a second definition of what
+// "expired" means to an entitlement.
 func (m *Module) settleExpiredVouchers(ctx context.Context, citizenID string) error {
-	tx, err := m.db.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-
-	if _, err := tx.Exec(ctx, `
-		UPDATE petro_entitlements e
-		   SET used_mnt = GREATEST(e.used_mnt - expired.amount, 0), updated_at = NOW()
-		  FROM (
-		      SELECT for_date, SUM(amount_mnt) AS amount
-		        FROM petro_vouchers
-		       WHERE citizen_id = $1 AND status = 'active' AND expires_at <= NOW()
-		       GROUP BY for_date
-		  ) AS expired
-		 WHERE e.citizen_id = $1 AND e.for_date = expired.for_date`, citizenID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(ctx, `
-		UPDATE petro_vouchers SET status = 'expired'
-		 WHERE citizen_id = $1 AND status = 'active' AND expires_at <= NOW()`, citizenID); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	_, err := m.db.Exec(ctx, settleExpiredSQL, citizenID)
+	return err
 }

@@ -36,6 +36,7 @@ package petro
 import (
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 
 	"github.com/gerege-systems/open-gerege-nexus/backend/pkg/nexus"
@@ -285,13 +286,22 @@ var oversightScopes = map[string]bool{
 // Console-only, through the same session check the operator overview makes:
 // appointing a regulator is a deployment act, not a tenant's own setting, and
 // an endpoint inside the tenant gate would let an organisation appoint itself.
+//
+// Reading the list takes any console session; appointing takes a role that may
+// change the deployment. The status check alone let an auditor or a support
+// operator hand a company read access over all of its competitors.
 func (m *Module) handleOversightBodies(w http.ResponseWriter, r *http.Request) {
-	if status := operatorSessionStatus(r); status != http.StatusOK {
+	status, role := operatorSession(r)
+	if status != http.StatusOK {
 		nexus.Error(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
 	if r.Method == http.MethodPost {
+		if role != "superadmin" && role != "operator" {
+			nexus.Error(w, http.StatusForbidden, "хяналтын байгууллага томилох эрхгүй")
+			return
+		}
 		var body OversightBody
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2048)).Decode(&body); err != nil {
 			nexus.Error(w, http.StatusBadRequest, "invalid payload")
@@ -305,15 +315,30 @@ func (m *Module) handleOversightBodies(w http.ResponseWriter, r *http.Request) {
 				"хамрах хүрээ нь national, tax, customs, aimag, audit-ийн нэг байна")
 			return
 		}
-		if _, err := m.db.Exec(r.Context(), `
-			INSERT INTO petro_oversight_bodies (tenant_id, name, scope, aimag)
-			VALUES ($1::uuid, $2, $3, $4)
-			ON CONFLICT (tenant_id) DO UPDATE
-			   SET name = EXCLUDED.name, scope = EXCLUDED.scope, aimag = EXCLUDED.aimag`,
-			body.TenantID, body.Name, body.Scope, body.Aimag); err != nil {
-			nexus.Error(w, http.StatusBadRequest, "could not appoint the body")
+		if !isUUID(body.TenantID) {
+			nexus.Error(w, http.StatusBadRequest, "байгууллагын id буруу")
 			return
 		}
+		tag, err := m.db.Exec(r.Context(), `
+			INSERT INTO petro_oversight_bodies (tenant_id, name, scope, aimag)
+			SELECT t.id, $2, $3, $4 FROM registry.tenants t WHERE t.id = $1::uuid
+			ON CONFLICT (tenant_id) DO UPDATE
+			   SET name = EXCLUDED.name, scope = EXCLUDED.scope, aimag = EXCLUDED.aimag`,
+			body.TenantID, body.Name, body.Scope, body.Aimag)
+		if err != nil {
+			slog.Error("petro: appoint oversight body", "tenant_id", body.TenantID, "error", err)
+			nexus.Error(w, http.StatusInternalServerError, "could not appoint the body")
+			return
+		}
+		if tag.RowsAffected() == 0 {
+			nexus.Error(w, http.StatusNotFound, "ийм байгууллага олдсонгүй")
+			return
+		}
+		// Who can see across every company is the most consequential setting
+		// this module has; it is written down even though the console session
+		// carries no platform user to attribute it to.
+		slog.Warn("petro: oversight body appointed", "tenant_id", body.TenantID,
+			"scope", body.Scope, "aimag", body.Aimag, "operator_role", role)
 	}
 
 	rows, err := m.db.Query(r.Context(), `

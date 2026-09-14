@@ -352,13 +352,23 @@ func (m *Module) handleSetStationGrade(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The station has to be one this organisation may write to. The policy
-	// already says so for the insert, but the foreign key would answer with a
-	// constraint violation, and "insert or update on table … violates" is not
-	// something to put in front of somebody filling in a form.
+	// Negative values are refused here, not left to the CHECK (migration 00015):
+	// a capacity below zero used to mean "no ceiling", and a violated constraint
+	// would come back as a generic 500.
+	if (draft.PriceMNT != nil && *draft.PriceMNT < 0) ||
+		(draft.CapacityLiters != nil && *draft.CapacityLiters < 0) {
+		nexus.Error(w, http.StatusBadRequest, "үнэ ба багтаамж сөрөг байж болохгүй")
+		return
+	}
+
+	// The station has to be one this organisation owns. The tenant is named in
+	// the query rather than left to the policy: an oversight body can READ every
+	// station (`oversight_read`), so a bare "is it visible" check let a regulator
+	// write grades — prices on the public map — onto a company's forecourt.
 	var exists bool
 	if err := m.db.QueryRow(r.Context(),
-		`SELECT EXISTS (SELECT 1 FROM petro_stations WHERE id = $1)`, stationID).Scan(&exists); err != nil || !exists {
+		`SELECT EXISTS (SELECT 1 FROM petro_stations WHERE id = $1 AND tenant_id = $2::uuid)`,
+		stationID, tenantID).Scan(&exists); err != nil || !exists {
 		nexus.Error(w, http.StatusNotFound, "ШТС олдсонгүй")
 		return
 	}

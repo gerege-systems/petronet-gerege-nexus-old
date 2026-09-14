@@ -153,12 +153,20 @@ finish() {
   # алгасагдаж, юуг тавихыг хэлнэ — таамгаар нэг байгууллагад бүх компанийн
   # өгөгдөл рүү хандах эрх өгөхөөс хоосон орхих нь дээр.
   if [ -n "${PETRONET_OVERSIGHT_SLUGS:-}" ]; then
-    local slugs
-    slugs="$(printf '%s' "$PETRONET_OVERSIGHT_SLUGS" | sed "s/[^,]*/'&'/g")"
-    psql_db -c "
-      INSERT INTO petro_oversight_bodies (tenant_id, name, scope)
-      SELECT id, name, 'national' FROM registry.tenants WHERE slug IN ($slugs)
-      ON CONFLICT (tenant_id) DO UPDATE SET name = EXCLUDED.name, scope = EXCLUDED.scope" >/dev/null
+    # Жагсаалтыг psql-ийн хувьсагчаар дамжуулна, SQL мөрөнд наахгүй: `'`-тэй
+    # утга шууд асуулга болж, «a, b» дахь зай чимээгүй таарахгүй болдог байв.
+    local added
+    added="$(psql_db -tA -v slugs="$PETRONET_OVERSIGHT_SLUGS" <<'SQL'
+WITH ins AS (
+  INSERT INTO petro_oversight_bodies (tenant_id, name, scope)
+  SELECT id, name, 'national' FROM registry.tenants
+   WHERE slug = ANY (SELECT btrim(s) FROM unnest(string_to_array(:'slugs', ',')) AS s)
+  ON CONFLICT (tenant_id) DO UPDATE SET name = EXCLUDED.name, scope = EXCLUDED.scope
+  RETURNING 1)
+SELECT count(*) FROM ins;
+SQL
+)"
+    echo "  хяналтын байгууллага: ${added} (заасан: ${PETRONET_OVERSIGHT_SLUGS})"
   else
     echo "  PETRONET_OVERSIGHT_SLUGS тавиагүй — алгаслаа"
     echo "  жишээ: PETRONET_OVERSIGHT_SLUGS=9129294,amgtg $0 finish"
