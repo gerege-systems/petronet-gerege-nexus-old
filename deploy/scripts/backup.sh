@@ -231,7 +231,7 @@ offsite || true
 # сүүлийн snapshot тэр файлыг агуулж буйг шалгана.
 offsite_restic() {
     [ -f "${BACKUP_RESTIC_ENV_FILE}" ] || return 0
-    local name
+    local name listing
     name="$(basename "${target}")"
     if ! docker run --rm --network host --env-file "${BACKUP_RESTIC_ENV_FILE}" \
             -v "${target}:/backup/${name}:ro" \
@@ -239,8 +239,11 @@ offsite_restic() {
         echo "backup: restic руу илгээж чадсангүй" >&2
         return 1
     fi
-    if ! docker run --rm --network host --env-file "${BACKUP_RESTIC_ENV_FILE}" \
-            "${BACKUP_RESTIC_IMAGE}" ls latest --host petronet 2>/dev/null | grep -qF "/backup/${name}"; then
+    # Captured before grep, not piped into it: `grep -q` exits on the first
+    # match, docker takes SIGPIPE, and pipefail turns a found file into a miss.
+    if ! listing="$(docker run --rm --network host --env-file "${BACKUP_RESTIC_ENV_FILE}" \
+            "${BACKUP_RESTIC_IMAGE}" ls latest --host petronet 2>/dev/null)" \
+        || ! grep -qF "/backup/${name}" <<<"${listing}"; then
         echo "backup: restic-ийн сүүлийн snapshot-д ${name} алга" >&2
         return 1
     fi
