@@ -71,8 +71,12 @@ export default function OversightPage() {
     const fail = (err: unknown) => {
       const message = err instanceof Error ? err.message : String(err);
       // A tenant that is not a supervisory body is not an error to debug; it is
-      // a person who followed a menu entry meant for somebody else.
-      if (message.includes("хяналтын байгууллагад")) {
+      // a person who followed a menu entry meant for somebody else. Both locks
+      // answer 403 — the platform's petro.oversight permission in English, the
+      // module's supervisory-body check in Mongolian — so the status decides,
+      // not the wording. Matching only the Mongolian left every section
+      // spinning under a raw English error.
+      if ((err as { status?: number }).status === 403) {
         setForbidden(true);
         return;
       }
