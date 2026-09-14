@@ -101,8 +101,16 @@ services:
       # дуудлага бүр CSRF шалгалт дээр унана (`native-apps/shared/device_lines.json`).
       ALLOWED_ORIGINS: ${PUBLIC_ORIGIN:-https://petronet.mn},${DEVICE_LINE_ORIGINS:-https://desktop.petronet.mn,https://mobile.petronet.mn,https://kiosk.petronet.mn,https://pos.petronet.mn}
       # nginx terminates TLS in front of this, so the forwarded client address
-      # can be trusted — and the login rate limiter counts on it being real.
+      # can be trusted.
       TRUST_PROXY_HEADERS: "true"
+      # Нэвтрэлтийн хязгаар хаяг тутамд. Энэ хост хуваалцсан TLS passthrough
+      # ирмэгийн ард (PROXY protocol-гүй) тул дээрх хаяг нь ҮРГЭЛЖ ирмэгийнх:
+      # цөмийн анхдагч 5/мин нь бүх хэрэглэгчийн нийт сав болж, 12 секунд тутам
+      # нэг хүсэлтээр бүх нэвтрэлтийг 429 болгодог байв. Энд flood-ийн тааз;
+      # таах халдлагаас дансны түгжээ хамгаална. Ирмэг жинхэнэ хаягийг дамжуулдаг
+      # болмогц хоёр мөрийг хасаж цөмийн анхдагч руу буцна.
+      LOGIN_RATE_PER_MINUTE: ${LOGIN_RATE_PER_MINUTE:-300}
+      LOGIN_BURST: ${LOGIN_BURST:-100}
 
       # The catalogue shipped in the image. File mode: an instance that pulled a
       # catalogue from a registry would be offering whatever that registry says

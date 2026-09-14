@@ -3,7 +3,7 @@ module github.com/gerege-systems/petronet-gerege-nexus
 go 1.26
 
 require (
-	github.com/gerege-systems/open-gerege-nexus/backend v1.16.1-0.20260914074630-c414330313e9
+	github.com/gerege-systems/open-gerege-nexus/backend v1.16.1-0.20260914084547-638fd90f2e52
 	github.com/go-chi/chi/v5 v5.3.2
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
