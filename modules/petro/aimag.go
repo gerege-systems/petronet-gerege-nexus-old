@@ -20,17 +20,40 @@ var Aimags = []string{
 // aimagMessage answers a name that is not on the list.
 const aimagMessage = "аймгийг жагсаалтаас сонгоно уу"
 
-// normalizeAimag trims a submitted province and says whether it is one.
-// Empty is allowed here; the callers that require a province say so themselves.
-func normalizeAimag(name string) (string, bool) {
+// aimagKey is a name with what people type differently taken out of it: case,
+// spaces, and every hyphen a keyboard or a word processor produces
+// («Баян‑Өлгий» with U+2011, «Дархан уул» with a space).
+func aimagKey(name string) string {
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case ' ', '\t', '-', '‐', '‑', '‒', '–', '—', ' ':
+			return -1
+		}
+		return r
+	}, strings.ToLower(name))
+}
+
+var aimagByKey = func() map[string]string {
+	byKey := make(map[string]string, len(Aimags))
+	for _, name := range Aimags {
+		byKey[aimagKey(name)] = name
+	}
+	return byKey
+}()
+
+// CanonicalAimag answers the register's spelling of a province and whether it
+// is one. Empty is allowed here; the callers that require a province say so
+// themselves. An unknown name comes back trimmed so it can be reported.
+func CanonicalAimag(name string) (string, bool) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return "", true
 	}
-	for _, known := range Aimags {
-		if name == known {
-			return name, true
-		}
+	if canonical, ok := aimagByKey[aimagKey(name)]; ok {
+		return canonical, true
 	}
 	return name, false
 }
+
+// normalizeAimag is CanonicalAimag under the name the handlers use.
+func normalizeAimag(name string) (string, bool) { return CanonicalAimag(name) }

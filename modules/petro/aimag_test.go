@@ -14,12 +14,16 @@ func TestAProvinceIsTakenFromTheList(t *testing.T) {
 		{"", "", true},
 		{"  Дорноговь ", "Дорноговь", true},
 		{"Улаанбаатар", "Улаанбаатар", true},
+		{"дорноговь", "Дорноговь", true},
+		{"Баян‑Өлгий", "Баян-Өлгий", true},
+		{"Дархан уул", "Дархан-Уул", true},
+		{"Говь алтай", "Говь-Алтай", true},
 		{"Дорноговь аймаг", "Дорноговь аймаг", false},
-		{"дорноговь", "дорноговь", false},
+		{"Gobi", "Gobi", false},
 	} {
-		got, ok := normalizeAimag(tc.in)
+		got, ok := CanonicalAimag(tc.in)
 		if got != tc.want || ok != tc.ok {
-			t.Errorf("normalizeAimag(%q) = %q, %v; want %q, %v", tc.in, got, ok, tc.want, tc.ok)
+			t.Errorf("CanonicalAimag(%q) = %q, %v; want %q, %v", tc.in, got, ok, tc.want, tc.ok)
 		}
 	}
 }

@@ -38,9 +38,11 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/gerege-systems/petronet-gerege-nexus/modules/petro"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -145,6 +147,11 @@ func run(tenantSlug, file, brand string, dryRun, demoStock bool) error {
 	}
 
 	selected := stations[:0:0]
+	// Province names the register does not know, with how many rows carried
+	// each. Refused like a station with no location rather than written: the
+	// province body reads by this name, and a row stored under a spelling off
+	// the list is a row that body never sees.
+	offList := map[string]int{}
 	for _, s := range stations {
 		if brand != "" && s.Brand != brand {
 			continue
@@ -152,11 +159,26 @@ func run(tenantSlug, file, brand string, dryRun, demoStock bool) error {
 		if s.Lat == 0 && s.Lon == 0 {
 			continue // a station with no location is not one this map can show
 		}
+		if _, known := petro.CanonicalAimag(aimagOf(s.District)); !known {
+			offList[strings.TrimSpace(s.District)]++
+			continue
+		}
 		selected = append(selected, s)
 	}
 
 	fmt.Printf("organisation %s (%s): %d of %d stations selected\n",
 		tenantSlug, tenantID, len(selected), len(stations))
+	if len(offList) > 0 {
+		names := make([]string, 0, len(offList))
+		for name := range offList {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		fmt.Printf("skipped %d province name(s) not on the register's list:\n", len(names))
+		for _, name := range names {
+			fmt.Printf("  %q — %d station(s)\n", name, offList[name])
+		}
+	}
 	if dryRun {
 		fmt.Println("dry run: nothing written")
 		return nil
@@ -172,6 +194,8 @@ func run(tenantSlug, file, brand string, dryRun, demoStock bool) error {
 
 	var stationRows, fuelRows int
 	for _, s := range selected {
+		// Known: off-list names were dropped above.
+		aimag, _ := petro.CanonicalAimag(aimagOf(s.District))
 		var id string
 		err := tx.QueryRow(ctx, `
 			INSERT INTO workspace.petro_stations
@@ -194,7 +218,7 @@ func run(tenantSlug, file, brand string, dryRun, demoStock bool) error {
 			              updated_at = NOW()
 			RETURNING id::text`,
 			tenantID, s.Name, s.Brand, s.BrandLabel, s.Lat, s.Lon,
-			aimagOf(s.District), districtOf(s.District), s.Address,
+			aimag, districtOf(s.District), s.Address,
 			defaultTo(s.OpeningHours, "24/7"),
 			defaultTo(s.Status, "available"), sourceName, s.ID,
 		).Scan(&id)

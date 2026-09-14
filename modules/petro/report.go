@@ -130,7 +130,8 @@ func lineKey(kind, id, product string) string { return kind + "|" + id + "|" + p
 // policy would quietly drop periods nobody has answered yet — which are
 // exactly the ones the sender needs to see.
 func (m *Module) handleListPeriods(w http.ResponseWriter, r *http.Request) {
-	if _, ok := nexus.RequireWorkspace(w, r); !ok {
+	tenantID, ok := nexus.RequireWorkspace(w, r)
+	if !ok {
 		return
 	}
 
@@ -167,14 +168,17 @@ func (m *Module) handleListPeriods(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The latest version per period, for this organisation only — the policy
-	// on the table does the scoping.
+	// The latest version per period, for this organisation only. Named here
+	// rather than left to the policy: an oversight body reads other companies'
+	// submissions too (migration 00010), and DISTINCT ON would then pick
+	// whichever company filed the highest version as "my submission".
 	subRows, err := m.db.Query(r.Context(), `
 		SELECT DISTINCT ON (s.period_id)
 		       s.id::text, s.period_id::text, s.version, s.status, s.source,`+submissionCountsSQL+`,
 		       s.submitted_at::text, s.reviewed_at::text,`+submissionReviewNoteSQL+`
 		  FROM petro_report_submissions s
-		 ORDER BY s.period_id, s.version DESC`)
+		 WHERE s.tenant_id = $1::uuid
+		 ORDER BY s.period_id, s.version DESC`, tenantID)
 	if err != nil {
 		nexus.Error(w, http.StatusInternalServerError, "could not read the submissions")
 		return
