@@ -49,6 +49,18 @@
 #                          чадахгүй. Хувийн түлхүүр нь операторт байна.
 #   BACKUP_S3_ENDPOINT / BACKUP_S3_BUCKET / BACKUP_S3_KEY / BACKUP_S3_SECRET
 #
+#   restic (rest-server, жишээ нь backups.gecore.mn) — S3-аас хамааралгүй,
+#   хоёулаа тохируулагдвал хоёуланд нь илгээнэ. Нууцыг .env-д биш, root-ийн
+#   файлд (анхдагч /etc/petronet/backup-restic.env, 600) хадгална:
+#     RESTIC_REPOSITORY=rest:https://<user>:<pass>@<host>/restic/<user>/
+#     RESTIC_PASSWORD=<repo-гийн шифрлэлтийн нууц үг>
+#   restic нь repo-гоо өөрөө шифрлэдэг тул age хэрэггүй. Хостод хоёртын файл
+#   суулгахгүй, pin хийсэн контейнерээс ажиллана (BACKUP_RESTIC_IMAGE).
+#
+#   Cron ямар ч env дамжуулдаггүй тул BACKUP_ENV_FILE (анхдагч
+#   /etc/petronet/backup.env) байвал эхэнд уншигдана — дээрх BACKUP_* утгуудыг
+#   тэнд бичнэ.
+#
 # ЭНЭ СКРИПТ НЬ ХАНГАЛТТАЙ ГЭДЭГ АМЛАЛТ БИШ. Нэг хостын дискэн дээрх нөөцлөлт
 # нь тэр хостыг алдвал хамт алга болно: docs/OPERATIONS.md бичсэнээр
 # өөр байршил руу хуулах (rclone, rsync, S3) нь дараагийн алхам. Гэхдээ
@@ -58,6 +70,16 @@ set -euo pipefail
 # Dump нь бүх сан: иргэдийн мэдээлэл, нууц үгийн hash. cron-ийн анхдагч umask
 # 022 нь түүнийг хостын дурын хэрэглэгчид уншигдахаар үлдээдэг байв.
 umask 077
+
+BACKUP_ENV_FILE="${BACKUP_ENV_FILE:-/etc/petronet/backup.env}"
+if [ -f "${BACKUP_ENV_FILE}" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "${BACKUP_ENV_FILE}"
+    set +a
+fi
+BACKUP_RESTIC_ENV_FILE="${BACKUP_RESTIC_ENV_FILE:-/etc/petronet/backup-restic.env}"
+BACKUP_RESTIC_IMAGE="${BACKUP_RESTIC_IMAGE:-restic/restic:0.18.1}"
 
 BACKUP_DIR="${BACKUP_DIR:-/var/backups/petronet}"
 BACKUP_KEEP_DAYS="${BACKUP_KEEP_DAYS:-14}"
@@ -201,6 +223,32 @@ offsite() {
 }
 
 offsite || true
+
+# restic rest-server руу — дээрхээс тусдаа хоёр дахь байршил.
+#
+# Repo нь append-only (сервер тал): эвдэрсэн энэ хост хуучин snapshot-ыг
+# устгаж чадахгүй, retention-ийг repo-гийн эзэн хийнэ. Илгээснийг итгэхгүй,
+# сүүлийн snapshot тэр файлыг агуулж буйг шалгана.
+offsite_restic() {
+    [ -f "${BACKUP_RESTIC_ENV_FILE}" ] || return 0
+    local name
+    name="$(basename "${target}")"
+    if ! docker run --rm --network host --env-file "${BACKUP_RESTIC_ENV_FILE}" \
+            -v "${target}:/backup/${name}:ro" \
+            "${BACKUP_RESTIC_IMAGE}" backup --quiet --host petronet --tag daily "/backup/${name}" >/dev/null; then
+        echo "backup: restic руу илгээж чадсангүй" >&2
+        return 1
+    fi
+    if ! docker run --rm --network host --env-file "${BACKUP_RESTIC_ENV_FILE}" \
+            "${BACKUP_RESTIC_IMAGE}" ls latest --host petronet 2>/dev/null | grep -qF "/backup/${name}"; then
+        echo "backup: restic-ийн сүүлийн snapshot-д ${name} алга" >&2
+        return 1
+    fi
+    offsite_ok=1
+    echo "backup: restic snapshot ${name}"
+    return 0
+}
+offsite_restic || true
 
 record true "${size}" "${target}"
 write_metrics true "${size}"
