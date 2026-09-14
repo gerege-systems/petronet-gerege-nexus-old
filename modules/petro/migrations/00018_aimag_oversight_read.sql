@@ -74,22 +74,22 @@ GRANT EXECUTE ON FUNCTION petro_oversight_sites() TO gerege_nexus_tenant;
 DROP POLICY oversight_read ON petro_stations;
 CREATE POLICY oversight_read ON petro_stations FOR SELECT TO gerege_nexus_tenant
     USING ((SELECT petro_oversight_sees_all())
-           OR id = ANY ((SELECT petro_oversight_sites())));
+           OR id = ANY ((SELECT petro_oversight_sites())::uuid[]));
 
 DROP POLICY oversight_read ON petro_station_inventory;
 CREATE POLICY oversight_read ON petro_station_inventory FOR SELECT TO gerege_nexus_tenant
     USING ((SELECT petro_oversight_sees_all())
-           OR station_id = ANY ((SELECT petro_oversight_sites())));
+           OR station_id = ANY ((SELECT petro_oversight_sites())::uuid[]));
 
 DROP POLICY oversight_read ON petro_depots;
 CREATE POLICY oversight_read ON petro_depots FOR SELECT TO gerege_nexus_tenant
     USING ((SELECT petro_oversight_sees_all())
-           OR id = ANY ((SELECT petro_oversight_sites())));
+           OR id = ANY ((SELECT petro_oversight_sites())::uuid[]));
 
 DROP POLICY oversight_read ON petro_depot_tanks;
 CREATE POLICY oversight_read ON petro_depot_tanks FOR SELECT TO gerege_nexus_tenant
     USING ((SELECT petro_oversight_sees_all())
-           OR depot_id = ANY ((SELECT petro_oversight_sites())));
+           OR depot_id = ANY ((SELECT petro_oversight_sites())::uuid[]));
 
 DROP POLICY oversight_read ON petro_customs_shipments;
 CREATE POLICY oversight_read ON petro_customs_shipments FOR SELECT TO gerege_nexus_tenant
@@ -98,37 +98,37 @@ CREATE POLICY oversight_read ON petro_customs_shipments FOR SELECT TO gerege_nex
 DROP POLICY oversight_read ON petro_dispatch_trips;
 CREATE POLICY oversight_read ON petro_dispatch_trips FOR SELECT TO gerege_nexus_tenant
     USING ((SELECT petro_oversight_sees_all())
-           OR from_depot_id = ANY ((SELECT petro_oversight_sites()))
-           OR to_station_id = ANY ((SELECT petro_oversight_sites())));
+           OR from_depot_id = ANY ((SELECT petro_oversight_sites())::uuid[])
+           OR to_station_id = ANY ((SELECT petro_oversight_sites())::uuid[]));
 
 DROP POLICY oversight_read ON petro_report_submissions;
 CREATE POLICY oversight_read ON petro_report_submissions FOR SELECT TO gerege_nexus_tenant
     USING ((SELECT petro_oversight_sees_all())
            OR EXISTS (SELECT 1 FROM petro_report_lines l
                        WHERE l.submission_id = petro_report_submissions.id
-                         AND l.site_id = ANY ((SELECT petro_oversight_sites()))));
+                         AND l.site_id = ANY ((SELECT petro_oversight_sites())::uuid[])));
 
 DROP POLICY oversight_read ON petro_report_lines;
 CREATE POLICY oversight_read ON petro_report_lines FOR SELECT TO gerege_nexus_tenant
     USING ((SELECT petro_oversight_sees_all())
-           OR site_id = ANY ((SELECT petro_oversight_sites())));
+           OR site_id = ANY ((SELECT petro_oversight_sites())::uuid[]));
 
 DROP POLICY oversight_read ON petro_validation_findings;
 CREATE POLICY oversight_read ON petro_validation_findings FOR SELECT TO gerege_nexus_tenant
     USING ((SELECT petro_oversight_sees_all())
            OR line_id IN (SELECT l.id FROM petro_report_lines l
-                           WHERE l.site_id = ANY ((SELECT petro_oversight_sites()))));
+                           WHERE l.site_id = ANY ((SELECT petro_oversight_sites())::uuid[])));
 
 DROP POLICY oversight_read ON petro_movements;
 CREATE POLICY oversight_read ON petro_movements FOR SELECT TO gerege_nexus_tenant
     USING ((SELECT petro_oversight_sees_all())
-           OR from_id = ANY ((SELECT petro_oversight_sites()))
-           OR to_id = ANY ((SELECT petro_oversight_sites())));
+           OR from_id = ANY ((SELECT petro_oversight_sites())::uuid[])
+           OR to_id = ANY ((SELECT petro_oversight_sites())::uuid[]));
 
 DROP POLICY oversight_read ON petro_devices;
 CREATE POLICY oversight_read ON petro_devices FOR SELECT TO gerege_nexus_tenant
     USING ((SELECT petro_oversight_sees_all())
-           OR site_id = ANY ((SELECT petro_oversight_sites())));
+           OR site_id = ANY ((SELECT petro_oversight_sites())::uuid[]));
 
 DROP POLICY oversight_read ON petro_daily_national;
 CREATE POLICY oversight_read ON petro_daily_national FOR SELECT TO gerege_nexus_tenant
