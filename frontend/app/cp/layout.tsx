@@ -1,7 +1,26 @@
-import { headers } from "next/headers";
+import type { Metadata } from "next";
+import { cookies, headers } from "next/headers";
 import { notFound } from "next/navigation";
 
 import Console from "@/components/cp/Console";
+import { localizedBrand } from "@/lib/brand";
+import { brandCopyFromEnv } from "@/lib/brandCopy";
+import { brandFromEnv } from "@/lib/brandEnv";
+import { DEFAULT_LOCALE, LOCALE_KEY } from "@/lib/locale";
+
+/**
+ * The console's tab says it is the console.
+ *
+ * The root layout names every tab after the brand, so the portal and the
+ * console — open side by side by the same operator — showed two identical
+ * "PetroNet System" tabs. The distinguishing word goes first: a narrowed tab
+ * keeps the start of its title and drops the end.
+ */
+export async function generateMetadata(): Promise<Metadata> {
+  const locale = (await cookies()).get(LOCALE_KEY)?.value || DEFAULT_LOCALE;
+  const brand = localizedBrand(brandFromEnv(), brandCopyFromEnv(), locale);
+  return { title: `${locale === "mn" ? "Админ" : "Admin"} · ${brand.name}` };
+}
 
 /**
  * The operator console's routes exist only on the console's hostname.
