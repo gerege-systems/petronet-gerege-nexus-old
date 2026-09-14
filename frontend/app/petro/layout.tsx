@@ -20,17 +20,22 @@ import { usePathname } from "next/navigation";
 import { Fuel } from "lucide-react";
 
 import { useI18n } from "@/lib/i18n";
+import { useAccess } from "@/lib/permissions";
 
 export default function FuelLayout({ children }: { children: React.ReactNode }) {
   const { t } = useI18n();
   const pathname = usePathname();
+  // Presentation only — every /oversight endpoint checks the permission itself.
+  const oversight = useAccess("petro.oversight");
 
   const tabs = [
     { href: "/petro/shipments", label: t("petro.tab.shipments") },
     { href: "/petro/depots", label: t("petro.tab.depots") },
     { href: "/petro", label: t("petro.tab.stations") },
     { href: "/petro/report", label: t("petro.tab.report") },
-    { href: "/petro/oversight", label: t("petro.tab.oversight") },
+    ...(!oversight.loading && oversight.allowed
+      ? [{ href: "/petro/oversight", label: t("petro.tab.oversight") }]
+      : []),
   ];
 
   return (
